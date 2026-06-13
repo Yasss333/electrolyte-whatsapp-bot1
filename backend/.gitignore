@@ -1,0 +1,17 @@
+.env
+./node_modules
+node_modules/
+
+.wwebjs_cache/
+session/
+
+# Generated files
+generated-images/
+
+# Database
+db/
+*.db
+
+# Logs
+logs/
+*.log
