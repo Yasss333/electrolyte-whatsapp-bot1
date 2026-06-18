@@ -3,6 +3,27 @@ const path = require('path');
 
 const db = new Database(path.join(__dirname, '../db/electrolyte.db'));
 
+db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_number TEXT UNIQUE,
+  technician_name TEXT,
+  customer_name TEXT,
+  city TEXT,
+  state TEXT,
+  zip TEXT,
+  complaint TEXT,
+  product_name TEXT,
+  wo_status TEXT,
+  line_item_status TEXT,
+  technician_assigned_date TEXT,
+  created_date TEXT,
+  end_date TEXT,
+  last_reminded_at TEXT,
+  resolved_at TEXT,
+  days_pending INTEGER DEFAULT 0,
+  updated_at TEXT
+)`).run();
+
 db.prepare(`CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   technician_name TEXT,
@@ -16,13 +37,22 @@ db.prepare(`CREATE TABLE IF NOT EXISTS replies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   phone TEXT,
   reply_text TEXT,
-  received_at TEXT
+  received_at TEXT,
+  classification TEXT DEFAULT 'unclassified'
 )`).run();
 
 db.prepare(`CREATE TABLE IF NOT EXISTS technicians (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE,
   phone TEXT
+)`).run();
+
+db.prepare(`CREATE TABLE IF NOT EXISTS escalations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_number TEXT,
+  technician_name TEXT,
+  escalated_at TEXT,
+  days_pending INTEGER
 )`).run();
 
 module.exports = db;
