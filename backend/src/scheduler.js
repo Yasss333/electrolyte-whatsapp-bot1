@@ -5,8 +5,8 @@ const path = require('path');
 const fs = require('fs');
 const { parseAndUpsertCSV } = require('./csvParser');
 
-const REMINDER_COOLDOWN_HOURS = 6;
-const ESCALATION_DAYS_THRESHOLD = 7;
+const REMINDER_COOLDOWN_HOURS = 3;
+const ESCALATION_DAYS_THRESHOLD = 700;
 const SUPERVISOR_PHONE = process.env.SUPERVISOR_PHONE || '';
 
 function shouldRemind(lastRemindedAt) {

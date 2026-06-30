@@ -1,7 +1,7 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
-const { generateTaskCard } = require('./imageGenerator');
+const { generateTasksCard } = require('./imageGenerator');
 const { classifyReply } = require('./csvParser');
 const db = require('./db');
 
@@ -12,7 +12,8 @@ const client = new Client({
   authStrategy: new LocalAuth({ dataPath: './session' }),
   puppeteer: {
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    protocolTimeout: 300_000, // 5 minutes (adjust as needed)
+    protocolTimeout: 300_000, // 5 minutes adjust this as need beaucse this is 
+    //done beacuse for bundelling  the parser so that pupter does no timeout
   },
 });
 
@@ -35,7 +36,7 @@ client.on('disconnected', () => {
 });
 
 client.on('message', (msg) => {
-  if (msg.from === 'status@broadcast') return; // ignore status updates
+  if (msg.from === 'status@broadcast') return; //  can be added as we fiund more bots  ignore status updates
   if (msg.isStatus) return;
   const phone = msg.from.replace('@c.us', '');
   const body = msg.body;
@@ -47,31 +48,61 @@ client.on('message', (msg) => {
 
   console.log(`Reply from ${phone} [${classification}]: ${body}`);
 });
-
-async function sendTaskReminder(task, phone) {
+async function sendTaskReminders(tasks, phone) {
   try {
-    const imagePath = generateTaskCard(task);
+    const technicianName = tasks[0].technician_name;
+    const imagePath = generateTasksCard(tasks, technicianName);
     const media = MessageMedia.fromFilePath(imagePath);
     const chatId = `91${phone}@c.us`;
 
-    await client.sendMessage(chatId, media, {
-      caption: `Hi ${task.technicianName}, your task (Case #${task.caseNumber}) at ${task.city} has been pending for *${task.daysPending} days*. Please update your status today. — Electrolyte Solutions`,
-    });
+   // Inside sendTaskReminders, replace the caption part:
+const taskList = tasks.map(t => 
+  `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
+).join('\n');
 
-    db.prepare(
-      `INSERT INTO messages (technician_name, phone, case_number, sent_at, status) VALUES (?, ?, ?, ?, ?)`
-    ).run(task.technicianName, phone, task.caseNumber, new Date().toISOString(), 'sent');
+const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
 
-    // Update last_reminded_at
-    db.prepare(`UPDATE tasks SET last_reminded_at = ? WHERE case_number = ?`)
-      .run(new Date().toISOString(), task.caseNumber);
+    await client.sendMessage(chatId, media, { caption });
 
-    console.log(`Sent to ${task.technicianName} (${phone})`);
+    // Log each sent message
+    for (const task of tasks) {
+      db.prepare(
+        `INSERT INTO messages (technician_name, phone, case_number, sent_at, status) VALUES (?, ?, ?, ?, ?)`
+      ).run(technicianName, phone, task.caseNumber, new Date().toISOString(), 'sent');
+      db.prepare(`UPDATE tasks SET last_reminded_at = ? WHERE case_number = ?`)
+        .run(new Date().toISOString(), task.caseNumber);
+    }
+
+    console.log(`Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
     await new Promise((res) => setTimeout(res, 4000));
   } catch (err) {
-    console.error(`Failed to send to ${task.technicianName}:`, err.message);
+    console.error(`Failed to send to ${tasks[0]?.technicianName || 'unknown'}:`, err.message);
   }
 }
+// async function sendTaskReminder(task, phone) {
+//   try {
+//     const imagePath = generateTaskCard(task);
+//     const media = MessageMedia.fromFilePath(imagePath);
+//     const chatId = `91${phone}@c.us`;
+
+//     await client.sendMessage(chatId, media, {
+//       caption: `Hi ${task.technicianName}, your task (Case #${task.caseNumber}) at ${task.city} has been pending for *${task.daysPending} days*. Please update your status today. — Electrolyte Solutions`,
+//     });
+
+//     db.prepare(
+//       `INSERT INTO messages (technician_name, phone, case_number, sent_at, status) VALUES (?, ?, ?, ?, ?)`
+//     ).run(task.technicianName, phone, task.caseNumber, new Date().toISOString(), 'sent');
+
+//     // Update last_reminded_at
+//     db.prepare(`UPDATE tasks SET last_reminded_at = ? WHERE case_number = ?`)
+//       .run(new Date().toISOString(), task.caseNumber);
+
+//     console.log(`Sent to ${task.technicianName} (${phone}) Bhej diya`);
+//     await new Promise((res) => setTimeout(res, 4000));
+//   } catch (err) {
+//     console.error(`Failed to send to ${task.technicianName}:`, err.message);
+//   }
+// }
 
 async function sendEscalation(task, supervisorPhone) {
   try {
@@ -93,4 +124,4 @@ async function sendEscalation(task, supervisorPhone) {
 function getQRCode() { return qrCodeBase64; }
 function getStatus() { return isReady; }
 
-module.exports = { client, sendTaskReminder, sendEscalation, getQRCode, getStatus };
+module.exports = { client, sendTaskReminders, sendEscalation, getQRCode, getStatus };

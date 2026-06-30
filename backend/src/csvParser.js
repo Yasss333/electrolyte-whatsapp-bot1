@@ -27,11 +27,11 @@ function parseAndUpsertCSV(filePath) {
 
     const insertStmt = db.prepare(`
       INSERT INTO tasks (
-        case_number, technician_name, customer_name, city, state, zip,
+        case_number, technician_name, customer_name, city, state, zip, street,
         complaint, product_name, wo_status, line_item_status,
         technician_assigned_date, created_date, end_date,
         days_pending, resolved_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(case_number) DO UPDATE SET
         wo_status=excluded.wo_status,
         line_item_status=excluded.line_item_status,
@@ -63,13 +63,14 @@ function parseAndUpsertCSV(filePath) {
         const woStatus = row['WO Status']?.trim();
         const techName = row['Technician Name']?.trim();
         const caseNumber = row['Case Number']?.trim();
+        const street = row['Street']?.trim() || '';
 
         if (!techName || !caseNumber) return;
 
         const isCompleted = lineItemStatus === 'Completed' || woStatus === 'Resolved';
         const daysPending = daysBetween(row['Technician Assigned Date']?.trim());
 
-        // Prepare insert data
+        // Prepare insert data (17 values)
         batch.push([
           caseNumber,
           techName,
@@ -77,6 +78,7 @@ function parseAndUpsertCSV(filePath) {
           row['City']?.trim(),
           row['State/Province']?.trim(),
           row['Zip/Postal Code']?.trim(),
+          street,
           row['Customer Complaint']?.trim(),
           row['Product Name']?.trim(),
           woStatus,
@@ -98,17 +100,19 @@ function parseAndUpsertCSV(filePath) {
         if (!isCompleted && lineItemStatus === 'New') {
           results.push({
             caseNumber,
-            technicianName: techName,
-            customerName: row['Customer Name']?.trim(),
+            case_number: caseNumber,
+            technician_name: techName,
+            customer_name: row['Customer Name']?.trim(),
             city: row['City']?.trim(),
             state: row['State/Province']?.trim(),
             zip: row['Zip/Postal Code']?.trim(),
+            street: street,
             complaint: row['Customer Complaint']?.trim(),
-            productName: row['Product Name']?.trim(),
+            product_name: row['Product Name']?.trim(),
             woStatus,
-            lineItemStatus,
-            technicianAssignedDate: row['Technician Assigned Date']?.trim(),
-            daysPending,
+            line_item_status: lineItemStatus,
+            technician_assigned_date: row['Technician Assigned Date']?.trim(),
+            days_pending: daysPending,
           });
         }
       })

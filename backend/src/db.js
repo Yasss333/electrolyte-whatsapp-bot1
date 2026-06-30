@@ -11,6 +11,7 @@ db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
   city TEXT,
   state TEXT,
   zip TEXT,
+  street TEXT, 
   complaint TEXT,
   product_name TEXT,
   wo_status TEXT,

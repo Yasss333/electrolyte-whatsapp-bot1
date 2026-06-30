@@ -74,8 +74,57 @@ export default function Upload() {
   };
 
   const hasPhone = technicians.some(t => t.phone && t.phone.trim() !== "");
+// const exportTasks = async () => {
+//   try {
+//     const response = await axios.get(`${API}/export-tasks`, {
+//       responseType: 'blob', // Important: receive as binary data
+//     });
 
-  return (
+//     // Create a download link
+//     const url = window.URL.createObjectURL(new Blob([response.data]));
+//     const link = document.createElement('a');
+//     link.href = url;
+//     // Extract filename from Content-Disposition header if available
+//     const contentDisposition = response.headers['content-disposition'];
+//     let filename = 'pending_tasks.xlsx';
+//     if (contentDisposition) {
+//       const match = contentDisposition.match(/filename="(.+)"/);
+//       if (match) filename = match[1];
+//     }
+//     link.setAttribute('download', filename);
+//     document.body.appendChild(link);
+//     link.click();
+//     link.remove();
+//     window.URL.revokeObjectURL(url);
+//   } catch (err) {
+//     setStatus('❌ Failed to export tasks: ' + err.message);
+//   }
+// };
+const exportTasks = async () => {
+  try {
+    const response = await axios.get(`${API}/export-tasks`, {
+      responseType: 'blob',
+    });
+
+    // Generate filename with current date
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const filename = `pending_tasks_${today}.xlsx`;
+
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    setStatus('❌ Failed to export tasks: ' + err.message);
+  }
+};
+
+return (
     <div className="max-w-5xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold text-orange-500">Upload & Send</h1>
 
@@ -96,7 +145,7 @@ export default function Upload() {
         {file && <p className="mt-3 text-green-400 text-sm">{file.name} selected</p>}
       </div>
 
-      <div className="flex gap-4 flex-wrap">
+      {/* <div className="flex gap-4 flex-wrap">
         <button onClick={handleUpload} className="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg font-medium">
           Load Tasks
         </button>
@@ -113,7 +162,32 @@ export default function Upload() {
         >
           🗑️ Clear Tasks
         </button>
-      </div>
+      </div> */}
+      <div className="flex gap-4 flex-wrap">
+  <button onClick={handleUpload} className="bg-slate-700 hover:bg-slate-600 px-6 py-2 rounded-lg font-medium">
+    Load Tasks
+  </button>
+  <button
+    onClick={handleBulkSend}
+    disabled={sending || tasks.length === 0 || !hasPhone}
+    className={`bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-6 py-2 rounded-lg font-medium`}
+  >
+    {sending ? "Sending..." : ` Bulk Send (${tasks.length})`}
+  </button>
+  <button
+    onClick={clearTasks}
+    className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-medium"
+  >
+    🗑️ Clear Tasks
+  </button>
+  <button
+    onClick={exportTasks}
+    disabled={tasks.length === 0}
+    className="bg-green-600 hover:bg-green-700 disabled:opacity-50 px-6 py-2 rounded-lg font-medium"
+  >
+    📥 Export Tasks
+  </button>
+</div>
 
       {status && <p className={`text-sm ${status.includes("❌") ? "text-red-400" : "text-green-400"}`}>{status}</p>}
 
