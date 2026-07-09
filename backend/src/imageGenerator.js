@@ -5,59 +5,59 @@ const path = require('path');
 function generateTasksCard(tasks, technicianName) {
   const safeName = technicianName || 'Technician';
 
-  // Columns – no Days column, wider fields
+  // Columns matching the attached image: Case #, Street, Customer, Zip Code, Complaint, LineItem Status
   const cols = [
-    { key: 'case_number', label: 'Case #', width: 100 },
-    { key: 'customer_name', label: 'Customer', width: 180 },
-    { key: 'city', label: 'City', width: 140 },
-    { key: 'complaint', label: 'Complaint', width: 240 },
-    { key: 'product_name', label: 'Product', width: 220 },
-    { key: 'technician_assigned_date', label: 'Assigned', width: 160 },
+    { key: 'case_number', label: 'Case #', width: 140 },
+    { key: 'street', label: 'Street', width: 360 },
+    { key: 'customer_name', label: 'Customer', width: 220 },
+    { key: 'zip', label: 'Zip Code', width: 110 },
+    { key: 'complaint', label: 'Complaint', width: 260 },
+    { key: 'line_item_status', label: 'LineItem Status', width: 140 },
   ];
 
-  const margin = 30;
-  const padding = 12;
-  const rowHeight = 38;
-  const headerHeight = 42;
-  const tableWidth = 1140; // sum of column widths + padding
-  const canvasWidth = 1200;
+  const margin = 24;
+  const padding = 10;
+  const rowHeight = 44;
+  const headerHeight = 48;
+  const tableWidth = cols.reduce((s, c) => s + c.width, 0) + padding * 2;
+  const canvasWidth = tableWidth + margin * 2 + 2;
 
   const totalRows = tasks.length;
   const tableHeight = headerHeight + totalRows * rowHeight + 10;
   const titleHeight = 80;
-  const footerHeight = 50;
+  const footerHeight = 40;
   const canvasHeight = titleHeight + tableHeight + footerHeight + 30;
 
   const canvas = createCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext('2d');
 
-  // White background
+  // Background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-  // Title
-  ctx.fillStyle = '#1e293b';
-  ctx.font = 'bold 28px sans-serif';
-  ctx.fillText(`📋 Pending Tasks for ${safeName}`, margin, 55);
+  // Title (left aligned like sample)
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 30px sans-serif';
+  ctx.fillText(`Pending Tasks for ${safeName}`, margin + 6, 48);
 
   ctx.fillStyle = '#475569';
-  ctx.font = '18px sans-serif';
-  ctx.fillText(`Total: ${tasks.length} task(s)`, margin, 82);
+  ctx.font = '16px sans-serif';
+  ctx.fillText(`Total: ${tasks.length} task(s)`, margin + 8, 72);
 
-  let y = 110;
+  let y = titleHeight;
 
-  // ---- Table header ----
-  ctx.fillStyle = '#f1f5f9';
+  // ---- Table header: yellow bar like sample ----
+  ctx.fillStyle = '#ffd24d'; // warm yellow
   ctx.fillRect(margin, y, tableWidth, headerHeight);
-  ctx.strokeStyle = '#94a3b8';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#dbae2b';
+  ctx.lineWidth = 2;
   ctx.strokeRect(margin, y, tableWidth, headerHeight);
 
-  ctx.fillStyle = '#1e293b';
+  ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 15px sans-serif';
   let x = margin + padding;
   for (const col of cols) {
-    ctx.fillText(col.label, x, y + 28);
+    ctx.fillText(col.label, x, y + 32);
     x += col.width;
   }
   y += headerHeight;
@@ -66,25 +66,23 @@ function generateTasksCard(tasks, technicianName) {
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
     const isEven = i % 2 === 0;
-    ctx.fillStyle = isEven ? '#ffffff' : '#f8fafc';
+    ctx.fillStyle = isEven ? '#fffef8' : '#ffffff'; // pale alternate
     ctx.fillRect(margin, y, tableWidth, rowHeight);
-    ctx.strokeStyle = '#e2e8f0';
-    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = '#e6d8b0';
+    ctx.lineWidth = 1;
     ctx.strokeRect(margin, y, tableWidth, rowHeight);
 
     ctx.fillStyle = '#0f172a';
     ctx.font = '14px sans-serif';
     let xPos = margin + padding;
     for (const col of cols) {
-      let value = task[col.key] || '';
-      // Show full values – no truncation (canvas will clip if too long, but we have width)
-      // We'll allow up to 30 chars; if longer, we reduce font slightly
-      if (value.length > 35) {
+      let value = (task[col.key] || '') + '';
+      if (value.length > 40) {
         ctx.font = '13px sans-serif';
       } else {
         ctx.font = '14px sans-serif';
       }
-      ctx.fillText(value, xPos, y + 26);
+      ctx.fillText(value, xPos, y + 30);
       xPos += col.width;
     }
     y += rowHeight;
@@ -92,8 +90,8 @@ function generateTasksCard(tasks, technicianName) {
 
   // ---- Footer ----
   ctx.fillStyle = '#94a3b8';
-  ctx.font = '14px sans-serif';
-  ctx.fillText('Electrolyte Solutions — Automated Reminder', margin, canvasHeight - 16);
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Electrolyte Solutions — Automated Reminder', margin + 6, canvasHeight - 12);
 
   const dir = path.join(__dirname, '../generated-images');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });

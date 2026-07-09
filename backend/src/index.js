@@ -16,12 +16,34 @@ app.use(express.json());
 
 const upload = multer({ dest: path.join(__dirname, '../data/tmp/') });
 
-client.initialize();
+try {
+  client.initialize();
+} catch (err) {
+  console.error('WhatsApp client initialization failed:', err.message);
+}
 startScheduler();
 
 // Ensure data directories exist
 fs.mkdirSync(path.join(__dirname, '../data'), { recursive: true });
 fs.mkdirSync(path.join(__dirname, '../data/tmp'), { recursive: true });
+
+async function initializeDataFromCsv() {
+  const csvPath = path.join(__dirname, '../data/input.csv');
+  if (!fs.existsSync(csvPath)) {
+    console.log('No startup CSV found; skipping initial import');
+    return;
+  }
+
+  try {
+    db.prepare('DELETE FROM tasks').run();
+    const pendingTasks = await parseAndUpsertCSV(csvPath);
+    console.log(`Startup CSV import completed. Pending ('New') tasks loaded: ${pendingTasks.length}`);
+  } catch (err) {
+    console.error('Startup CSV import error:', err.message);
+  }
+}
+
+initializeDataFromCsv();
 
 // QR Code endpoint
 app.get('/api/qr', (req, res) => {
@@ -139,7 +161,8 @@ app.post('/api/upload', upload.single('csv'), async (req, res) => {
 // Export pending tasks as Excel with two sheets
 app.get('/api/export-tasks', async (req, res) => {
   try {
-    // Fetch all pending tasks with status 'New'
+    // Fetch all tasks with status 'New' regardless of resolved_at, since the parser may set
+    // resolved_at for rows that are still marked as New in the CSV export.
     const tasks = db.prepare(`
       SELECT 
         case_number,
@@ -152,7 +175,7 @@ app.get('/api/export-tasks', async (req, res) => {
         product_name,
         line_item_status
       FROM tasks 
-      WHERE resolved_at IS NULL AND line_item_status = 'New'
+      WHERE line_item_status = 'New'
       ORDER BY technician_name, case_number ASC
     `).all();
 
@@ -187,34 +210,39 @@ app.get('/api/export-tasks', async (req, res) => {
       });
     });
 
-    // Style header
+    // Style header (warm yellow like the provided image)
     const listHeader = listSheet.getRow(1);
     listHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    listHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFf97316' } };
+    listHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFD24D' } };
 
-    // ---------- Sheet 2: Summary (Pivot) ----------
-    const summarySheet = workbook.addWorksheet('Summary');
+    // ---------- Sheet 2: Day-Wise Summary (Pivot) ----------
+    const summarySheet = workbook.addWorksheet('Day-Wise Summary');
 
-    // Get distinct statuses (LineItem Status) from tasks
-    const statuses = db.prepare(`
-      SELECT DISTINCT line_item_status FROM tasks 
-      WHERE resolved_at IS NULL AND line_item_status IS NOT NULL AND line_item_status != ''
-      ORDER BY line_item_status
-    `).all().map(r => r.line_item_status);
+    // Build Summary pivot with dynamic day buckets (0 to max days_pending)
+    
+    // First, find the maximum days_pending value
+    const maxDaysRow = db.prepare(`
+      SELECT MAX(days_pending) as max_days
+      FROM tasks
+      WHERE line_item_status = 'New'
+    `).get();
+    
+    const maxDays = maxDaysRow?.max_days || 0;
+    const dayBuckets = Array.from({ length: maxDays + 1 }, (_, i) => i);
 
-    // Get technicians with counts per status
+    // Get technicians with counts per days_pending
     const techRows = db.prepare(`
       SELECT 
         technician_name,
-        line_item_status,
+        days_pending,
         COUNT(*) as cnt
       FROM tasks
-      WHERE resolved_at IS NULL AND line_item_status = 'New'
-      GROUP BY technician_name, line_item_status
-      ORDER BY technician_name
+      WHERE line_item_status = 'New'
+      GROUP BY technician_name, days_pending
+      ORDER BY technician_name, days_pending
     `).all();
 
-    // Build pivot: technician_name -> status -> count
+    // Build pivot: technician_name -> day -> count
     const pivot = {};
     const allTechs = [];
     for (const row of techRows) {
@@ -223,27 +251,24 @@ app.get('/api/export-tasks', async (req, res) => {
         pivot[tech] = {};
         allTechs.push(tech);
       }
-      pivot[tech][row.line_item_status] = row.cnt;
+      pivot[tech][String(row.days_pending)] = row.cnt;
     }
 
-    // Add a row for totals per status
-    const statusTotals = {};
-    // Also add a Grand Total column
-    let grandTotal = 0;
-
-    // Build the table header: Row Labels | status1 | status2 | ... | Grand Total
-    const headerRow = ['Technician', ...statuses, 'Total'];
+    // Header: Technician | 0 | 1 | ... | 6 | Total
+    const headerRow = ['Technician', ...dayBuckets.map(d => String(d)), 'Grand Total'];
     summarySheet.addRow(headerRow);
 
     // Add data rows
+    let grandTotal = 0;
+    const statusTotals = {};
     for (const tech of allTechs) {
       const rowData = [tech];
       let techTotal = 0;
-      for (const status of statuses) {
-        const cnt = pivot[tech]?.[status] || 0;
+      for (const d of dayBuckets) {
+        const cnt = pivot[tech]?.[String(d)] || 0;
         rowData.push(cnt);
         techTotal += cnt;
-        statusTotals[status] = (statusTotals[status] || 0) + cnt;
+        statusTotals[d] = (statusTotals[d] || 0) + cnt;
       }
       rowData.push(techTotal);
       grandTotal += techTotal;
@@ -252,8 +277,8 @@ app.get('/api/export-tasks', async (req, res) => {
 
     // Add Grand Total row
     const totalRow = ['Grand Total'];
-    for (const status of statuses) {
-      totalRow.push(statusTotals[status] || 0);
+    for (const d of dayBuckets) {
+      totalRow.push(statusTotals[d] || 0);
     }
     totalRow.push(grandTotal);
     summarySheet.addRow(totalRow);
@@ -263,16 +288,14 @@ app.get('/api/export-tasks', async (req, res) => {
     summaryHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     summaryHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFf97316' } };
 
-    // Make the Grand Total row bold
+    // Make the Grand Total row bold with grey background
     const lastRowNum = summarySheet.rowCount;
     const grandTotalRow = summarySheet.getRow(lastRowNum);
     grandTotalRow.font = { bold: true };
     grandTotalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFe2e8f0' } };
 
-    // Auto-width for summary columns
-    summarySheet.columns.forEach(col => {
-      col.width = Math.max(15, col.header?.length || 10);
-    });
+    // Set reasonable column widths for summary sheet
+    summarySheet.columns = summaryHeader.values.map((h, i) => ({ width: i === 0 ? 30 : 10 }));
 
     // ---------- Generate file ----------
     const today = new Date().toISOString().split('T')[0];
@@ -367,99 +390,204 @@ app.post('/api/send', async (req, res) => {
     WHERE resolved_at IS NULL AND line_item_status = 'New'
   `).all();
   const technicians = db.prepare('SELECT * FROM technicians').all();
-
-  // Group tasks by technician name (using a smart match)
+  // We'll build groups and also capture unmatched/skipped reasons for admin
   const groups = new Map();
+  const skipped = [];
+
   for (const task of pendingTasks) {
-    const techName = task.technician_name;
-    // Find best matching technician from directory
-    const matched = findBestMatch(techName, technicians);
-    if (matched) {
-      if (!groups.has(matched.id)) {
-        groups.set(matched.id, { ...matched, tasks: [] });
-      }
-      groups.get(matched.id).tasks.push(task);
+    const techName = task.technician_name || '';
+    const match = findBestMatchDetailed(techName, technicians);
+    if (!match || !match.technician) {
+      skipped.push({
+        technicianName: techName,
+        reason: match?.reason || 'name not found',
+        suggestion: match?.suggestion || null,
+        case_number: task.case_number
+      });
+      continue;
     }
+
+    const tech = match.technician;
+    // validate phone: simple numeric length check (10 digits expected)
+    const phoneDigits = (tech.phone || '').replace(/\D/g, '');
+    if (phoneDigits.length < 10) {
+      skipped.push({
+        technicianName: techName,
+        matchedTo: tech.name,
+        reason: 'invalid phone',
+        phone: tech.phone,
+        case_number: task.case_number
+      });
+      continue;
+    }
+
+    if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
+    groups.get(tech.id).tasks.push(task);
   }
 
   let sent = 0;
-  const skipped = [];
+  const sendErrors = [];
 
   for (const [techId, techData] of groups) {
     try {
       await sendTaskReminders(techData.tasks, techData.phone);
       sent++;
     } catch (err) {
-      skipped.push({
-        technician: techData.name,
-        reason: `Send failed: ${err.message}`
-      });
+      sendErrors.push({ technician: techData.name, reason: `Send failed: ${err.message}` });
     }
+  }
+
+  // Persist skipped and sendErrors into send_reports for frontend visibility
+  const insertReport = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+  const now = new Date().toISOString();
+  for (const s of skipped) {
+    insertReport.run(now, s.technicianName || null, s.matchedTo || s.matched_name || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
+  }
+  for (const e of sendErrors) {
+    insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
   }
 
   res.json({
     success: true,
     sent,
-    skipped: skipped.length,
-    details: skipped.slice(0, 10)
+    skipped: skipped.length + sendErrors.length,
+    details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
   });
 });
 
+// Return recent send reports (skipped/errors) for frontend dashboard
+app.get('/api/send-reports', (req, res) => {
+  // Aggregate by matched_name or technician_name to keep frontend simple
+  const rows = db.prepare(`
+    SELECT COALESCE(matched_name, technician_name, 'Unknown') as name,
+      COUNT(*) as count,
+      MAX(created_at) as last_seen
+    FROM send_reports
+    GROUP BY name
+    ORDER BY count DESC
+    LIMIT 200
+  `).all();
+  res.json(rows);
+});
+
+// One-off: recover likely-unsent tasks by comparing pending tasks vs messages
+app.post('/api/recover-send-reports', (req, res) => {
+  try {
+    // Find pending tasks (New) that have no message record in the last 7 days
+    const rows = db.prepare(`
+      SELECT t.case_number, t.technician_name, t.zip, t.city
+      FROM tasks t
+      WHERE t.resolved_at IS NULL AND t.line_item_status = 'New'
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m WHERE m.case_number = t.case_number AND m.sent_at >= datetime('now', '-7 days')
+        )
+    `).all();
+
+    const insert = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    const now = new Date().toISOString();
+    let inserted = 0;
+    for (const r of rows) {
+      insert.run(now, r.technician_name || null, null, null, r.case_number || null, 'no message recorded (recovered)', null, 'recovered');
+      inserted++;
+    }
+
+    res.json({ success: true, recovered: inserted });
+  } catch (err) {
+    console.error('Recover failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Helper: find best match for technician name
-function findBestMatch(name, technicians) {
-  const normalized = name.trim().toLowerCase();
-  // exact match
-  let found = technicians.find(t => t.name.trim().toLowerCase() === normalized);
-  if (found) return found;
-  // partial match (contains)
-  found = technicians.find(t => t.name.trim().toLowerCase().includes(normalized) || normalized.includes(t.name.trim().toLowerCase()));
-  return found || null;
+function normalizeName(n) {
+  if (!n) return '';
+  return n.toString().toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function levenshtein(a, b) {
+  if (!a || !b) return Math.max(a?.length || 0, b?.length || 0);
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[m][n];
+}
+
+// Returns detailed match info: { technician, reason, suggestion }
+function findBestMatchDetailed(name, technicians) {
+  const norm = normalizeName(name || '');
+  if (!norm) return { technician: null, reason: 'empty name' };
+
+  // exact normalized match
+  for (const t of technicians) {
+    if (normalizeName(t.name) === norm) return { technician: t };
+  }
+
+  // contains match or startsWith
+  for (const t of technicians) {
+    const tn = normalizeName(t.name);
+    if (tn.includes(norm) || norm.includes(tn)) return { technician: t, reason: 'partial match' };
+  }
+
+  // fallback: use levenshtein distance to find best candidate
+  let best = null;
+  let bestScore = Infinity;
+  for (const t of technicians) {
+    const tn = normalizeName(t.name);
+    const dist = levenshtein(norm, tn);
+    const rel = dist / Math.max(norm.length, tn.length);
+    if (rel < bestScore) {
+      bestScore = rel;
+      best = t;
+    }
+  }
+
+  // If relative distance is small enough, suggest as typo; threshold 0.4
+  if (best && bestScore <= 0.4) {
+    return { technician: best, reason: 'possible typo', suggestion: best.name };
+  }
+
+  return { technician: null, reason: 'no good match', suggestion: best?.name || null };
 }
 
 // Dashboard stats (unchanged, but now pending only from current data)
 app.get('/api/stats', (req, res) => {
-  const totalSent = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;
-  const totalPending = db.prepare(
-    'SELECT COUNT(*) as count FROM tasks WHERE resolved_at IS NULL AND line_item_status = \'New\''
-  ).get().count;
-  const totalResolved = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE resolved_at IS NOT NULL').get().count;
-  const resolvedToday = db.prepare(
-    `SELECT COUNT(*) as count FROM tasks WHERE date(resolved_at) = date(?)`
-  ).get(new Date().toISOString()).count;
-  const replies = db.prepare('SELECT * FROM replies ORDER BY received_at DESC LIMIT 50').all();
-  const recentMessages = db.prepare('SELECT * FROM messages ORDER BY sent_at DESC LIMIT 50').all();
-  const escalations = db.prepare('SELECT * FROM escalations ORDER BY escalated_at DESC LIMIT 20').all();
+  // Only return messages sent today and messages sent in last 30 days per request
+  const sentToday = db.prepare(`
+    SELECT COUNT(*) as count FROM messages WHERE date(sent_at) = date(?)
+  `).get(new Date().toISOString()).count;
 
-  const techStats = db.prepare(`
-    SELECT technician_name,
-      COUNT(*) as total,
-      SUM(CASE WHEN resolved_at IS NULL AND line_item_status = 'New' THEN 1 ELSE 0 END) as pending,
-      SUM(CASE WHEN resolved_at IS NOT NULL THEN 1 ELSE 0 END) as completed,
-      AVG(days_pending) as avg_days_pending
-    FROM tasks
-    GROUP BY technician_name
-    ORDER BY pending DESC
-  `).all();
+  const sentLast30 = db.prepare(`
+    SELECT COUNT(*) as count FROM messages WHERE sent_at >= datetime(?, '-30 days')
+  `).get(new Date().toISOString()).count;
 
-  const dailyVolume = db.prepare(`
-    SELECT date(sent_at) as day, COUNT(*) as count
-    FROM messages
-    WHERE sent_at >= date('now', '-7 days')
-    GROUP BY date(sent_at)
-    ORDER BY day ASC
-  `).all();
-
-  const replyClassification = db.prepare(`
-    SELECT classification, COUNT(*) as count FROM replies GROUP BY classification
-  `).all();
-
-  res.json({
-    totalSent, totalPending, totalResolved, resolvedToday,
-    replies, recentMessages, escalations,
-    techStats, dailyVolume, replyClassification,
-  });
+  res.json({ sentToday, sentLast30 });
 });
 
 app.listen(process.env.PORT || 5000, () => {
   console.log(`Backend running on port ${process.env.PORT || 5000}`);
+});
+
+// Technician leaderboard: pending task counts per technician
+app.get('/api/tech-leaderboard', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT technician_name, COUNT(*) as pending
+      FROM tasks
+      WHERE resolved_at IS NULL AND line_item_status = 'New'
+      GROUP BY technician_name
+      ORDER BY pending DESC
+      LIMIT 50
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    console.error('Leaderboard error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
 });

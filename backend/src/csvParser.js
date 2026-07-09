@@ -4,9 +4,22 @@ const db = require('./db');
 
 function daysBetween(dateStr) {
   if (!dateStr) return 0;
-  const parts = dateStr.split('-');
+  
+  // Remove time component if present (e.g., ", 5:30 pm")
+  const dateOnly = dateStr.split(',')[0].trim();
+  
+  // Split by "/" for DD/MM/YYYY format
+  const parts = dateOnly.split('/');
   if (parts.length !== 3) return 0;
-  const assigned = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
+  
+  const day = parts[0];
+  const month = parts[1];
+  const year = parts[2];
+  
+  // Create date in YYYY-MM-DD format: new Date('2020-12-17')
+  const assigned = new Date(`${year}-${month}-${day}`);
+  if (isNaN(assigned.getTime())) return 0; // Invalid date
+  
   const now = new Date();
   return Math.floor((now - assigned) / (1000 * 60 * 60 * 24));
 }
@@ -32,12 +45,6 @@ function parseAndUpsertCSV(filePath) {
         technician_assigned_date, created_date, end_date,
         days_pending, resolved_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(case_number) DO UPDATE SET
-        wo_status=excluded.wo_status,
-        line_item_status=excluded.line_item_status,
-        days_pending=excluded.days_pending,
-        resolved_at=CASE WHEN excluded.resolved_at IS NOT NULL THEN excluded.resolved_at ELSE tasks.resolved_at END,
-        updated_at=excluded.updated_at
     `);
 
     const insertMany = db.transaction((rows) => {
@@ -67,8 +74,9 @@ function parseAndUpsertCSV(filePath) {
 
         if (!techName || !caseNumber) return;
 
-        const isCompleted = lineItemStatus === 'Completed' || woStatus === 'Resolved';
-        const daysPending = daysBetween(row['Technician Assigned Date']?.trim());
+        const shouldMarkResolved = lineItemStatus !== 'New' && (lineItemStatus === 'Completed' || woStatus === 'Resolved');
+        const isCompleted = shouldMarkResolved;
+        const daysPending = daysBetween(row['Created Date']?.trim());
 
         // Prepare insert data (17 values)
         batch.push([
@@ -87,7 +95,7 @@ function parseAndUpsertCSV(filePath) {
           row['Created Date']?.trim(),
           row['End Date']?.trim(),
           daysPending,
-          isCompleted ? new Date().toISOString() : null,
+          shouldMarkResolved ? new Date().toISOString() : null,
           new Date().toISOString()
         ]);
 

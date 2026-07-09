@@ -5,13 +5,13 @@ const db = new Database(path.join(__dirname, '../db/electrolyte.db'));
 
 db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  case_number TEXT UNIQUE,
+  case_number TEXT,
   technician_name TEXT,
   customer_name TEXT,
   city TEXT,
   state TEXT,
   zip TEXT,
-  street TEXT, 
+  street TEXT,
   complaint TEXT,
   product_name TEXT,
   wo_status TEXT,
@@ -54,6 +54,18 @@ db.prepare(`CREATE TABLE IF NOT EXISTS escalations (
   technician_name TEXT,
   escalated_at TEXT,
   days_pending INTEGER
+)`).run();
+
+db.prepare(`CREATE TABLE IF NOT EXISTS send_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT,
+  technician_name TEXT,
+  matched_name TEXT,
+  phone TEXT,
+  case_number TEXT,
+  reason TEXT,
+  suggestion TEXT,
+  type TEXT
 )`).run();
 
 module.exports = db;
