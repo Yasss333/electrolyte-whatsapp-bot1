@@ -166,7 +166,7 @@ app.get('/api/export-tasks', async (req, res) => {
     const tasks = db.prepare(`
       SELECT 
         case_number,
-        technician_name,
+        COALESCE(NULLIF(technician_name, ''), 'Unassigned') AS technician_name,
         customer_name,
         city,
         street,
@@ -233,7 +233,7 @@ app.get('/api/export-tasks', async (req, res) => {
     // Get technicians with counts per days_pending
     const techRows = db.prepare(`
       SELECT 
-        technician_name,
+        COALESCE(NULLIF(technician_name, ''), 'Unassigned') AS technician_name,
         days_pending,
         COUNT(*) as cnt
       FROM tasks
