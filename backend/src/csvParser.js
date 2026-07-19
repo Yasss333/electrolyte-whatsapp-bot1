@@ -32,12 +32,12 @@ function normalizeTechnicianName(rawName) {
   return trimmed;
 }
 
-function classifyReply(text) {
-  const t = text.toLowerCase();
-  if (['done', 'completed', 'finish', 'fixed', 'resolved'].some(w => t.includes(w))) return 'completed';
-  if (['part', 'waiting', 'delay', 'pending', 'stuck'].some(w => t.includes(w))) return 'delayed';
-  return 'unclassified';
-}
+// function classifyReply(text) {
+//   const t = text.toLowerCase();
+//   if (['done', 'completed', 'finish', 'fixed', 'resolved'].some(w => t.includes(w))) return 'completed';
+//   if (['part', 'waiting', 'delay', 'pending', 'stuck'].some(w => t.includes(w))) return 'delayed';
+//   return 'unclassified';
+// }
 
 function parseAndUpsertCSV(filePath) {
   return new Promise((resolve, reject) => {
@@ -142,4 +142,4 @@ function parseAndUpsertCSV(filePath) {
   });
 }
 
-module.exports = { parseAndUpsertCSV, classifyReply };
+module.exports = { parseAndUpsertCSV };
