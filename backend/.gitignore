@@ -9,8 +9,8 @@ session/
 generated-images/
 
 # Database
-db/
 *.db
+!backend/db/electrolyte.db
 
 # Logs
 logs/

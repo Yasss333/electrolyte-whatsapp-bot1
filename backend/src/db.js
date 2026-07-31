@@ -1,7 +1,22 @@
-const Database = require('better-sqlite3');
-const path = require('path');
+const Database = require("better-sqlite3");
+const path = require("path");
+const fs = require("fs");
 
-const db = new Database(path.join(__dirname, '../db/electrolyte.db'));
+// Define the directory
+const dbDir = path.join(__dirname, "../db");
+
+// Create the directory if it doesn't exist
+if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+}
+
+// Define the database path
+const dbPath = path.join(dbDir, "electrolyte.db");
+
+// Open (or create) the database
+const db = new Database(dbPath);
+
+console.log("Database path:", dbPath);
 
 db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
