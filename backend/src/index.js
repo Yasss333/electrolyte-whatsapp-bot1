@@ -55,6 +55,10 @@ app.get('/api/qr', (req, res) => {
   });
 });
 
+app.get("/",(req,res)=>{
+  console.log("Nilesh dont forget you are a KAMAL");
+})
+
 // Upload task CSV – clear existing tasks first
 app.post('/api/upload', upload.single('csv'), async (req, res) => {
   const dest = path.join(__dirname, '../data/input.csv');
