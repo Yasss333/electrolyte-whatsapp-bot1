@@ -6,32 +6,40 @@ const db = require('./db');
 
 let qrCodeBase64 = null;
 let isReady = false;
+let qrGenerated = false;
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: './session' }),
+  authStrategy: new LocalAuth({ dataPath: '/app/data/session' }),
   puppeteer: {
      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
     protocolTimeout: 300000,
     // 5 minutes adjust this as need beaucse this is 
+    //done beacuse for bundelling  the parser so that pupter does not timeout during the parsing 
     args: ['--no-sandbox', '--disable-setuid-sandbox',  "--disable-dev-shm-usage",
       "--disable-gpu"],
-    //done beacuse for bundelling  the parser so that pupter does not timeout during the parsing 
   },
 });
 
 client.on('qr', async (qr) => {
-  qrcode.generate(qr, { small: true });
-  qrCodeBase64 = await QRCode.toDataURL(qr);
-  isReady = false;
-  console.log('QR generated');
+  if (!qrGenerated) {
+    qrcode.generate(qr, { small: true });
+    qrCodeBase64 = await QRCode.toDataURL(qr);
+    qrGenerated = true;
+    isReady = false;
+    console.log('QR generated and stored');
+  } else {
+    console.log('QR regenerated, ignoring');
+  }
 });
 
 client.on('ready', () => {
   isReady = true;
-  qrCodeBase64 = null;
-  console.log('WhatsApp client ready hai ');
+  qrCodeBase64 = null;   // clear QR after successful connection
+  qrGenerated = false;   // allow new QR if disconnected later
+  console.log('WhatsApp client ready');
 });
+
 
 client.on('disconnected', () => {
   isReady = false;

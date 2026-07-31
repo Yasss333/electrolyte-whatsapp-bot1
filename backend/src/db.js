@@ -11,7 +11,7 @@ if (!fs.existsSync(dbDir)) {
 }
 
 // Define the database path
-const dbPath = path.join(dbDir, "electrolyte.db");
+const dbPath = process.env.DB_PATH || path.join(dbDir, "electrolyte.db");
 
 // Open (or create) the database
 const db = new Database(dbPath);
