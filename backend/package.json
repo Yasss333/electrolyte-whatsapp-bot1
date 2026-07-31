@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "prestart": "rm -rf /app/data/session/Singleton* || true",
     "dev": "nodemon src/index.js"
   },
   "keywords": [],
