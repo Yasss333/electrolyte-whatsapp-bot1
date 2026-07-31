@@ -509,9 +509,11 @@ app.get('/api/stats', (req, res) => {
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
 });
-app.get("/",(req,res)=>{
-  console.log("Nilesh dont forget you are a KAMAL");
-  res.end("Nilesh dont forget you are a KAMAL");
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Backend running :Nilesh dont forget you are a KAMAL",
+  });
 });
 app.listen(process.env.PORT || 5000, () => {
   console.log(`Backend running on port ${process.env.PORT || 5000}`);
