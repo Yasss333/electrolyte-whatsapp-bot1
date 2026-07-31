@@ -55,9 +55,6 @@ app.get('/api/qr', (req, res) => {
   });
 });
 
-app.get("/",(req,res)=>{
-  console.log("Nilesh dont forget you are a KAMAL");
-})
 
 // Upload task CSV – clear existing tasks first
 app.post('/api/upload', upload.single('csv'), async (req, res) => {
@@ -99,7 +96,7 @@ app.get('/api/export-tasks', async (req, res) => {
         complaint,
         product_name,
         line_item_status
-      FROM tasks 
+        FROM tasks 
       WHERE line_item_status = 'New'
       ORDER BY technician_name, case_number ASC
     `).all();
@@ -134,7 +131,7 @@ app.get('/api/export-tasks', async (req, res) => {
         line_item_status: task.line_item_status || '',
       });
     });
-
+    
     // Style header (warm yellow like the provided image)
     const listHeader = listSheet.getRow(1);
     listHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -142,7 +139,7 @@ app.get('/api/export-tasks', async (req, res) => {
 
     // ---------- Sheet 2: Day-Wise Summary (Pivot) ----------
     const summarySheet = workbook.addWorksheet('Day-Wise Summary');
-
+    
     // Build Summary pivot with dynamic day buckets (0 to max days_pending)
     
     // First, find the maximum days_pending value
@@ -150,8 +147,8 @@ app.get('/api/export-tasks', async (req, res) => {
       SELECT MAX(days_pending) as max_days
       FROM tasks
       WHERE line_item_status = 'New'
-    `).get();
-    
+      `).get();
+      
     const maxDays = maxDaysRow?.max_days || 0;
     const dayBuckets = Array.from({ length: maxDays + 1 }, (_, i) => i);
 
@@ -165,11 +162,11 @@ app.get('/api/export-tasks', async (req, res) => {
       WHERE line_item_status = 'New'
       GROUP BY technician_name, days_pending
       ORDER BY technician_name, days_pending
-    `).all();
-
-    // Build pivot: technician_name -> day -> count
-    const pivot = {};
-    const allTechs = [];
+      `).all();
+      
+      // Build pivot: technician_name -> day -> count
+      const pivot = {};
+      const allTechs = [];
     for (const row of techRows) {
       const tech = row.technician_name;
       if (!pivot[tech]) {
@@ -212,7 +209,7 @@ app.get('/api/export-tasks', async (req, res) => {
     const summaryHeader = summarySheet.getRow(1);
     summaryHeader.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     summaryHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFf97316' } };
-
+    
     // Make the Grand Total row bold with grey background
     const lastRowNum = summarySheet.rowCount;
     const grandTotalRow = summarySheet.getRow(lastRowNum);
@@ -226,7 +223,7 @@ app.get('/api/export-tasks', async (req, res) => {
     // const today = new Date().toISOString().split('T')[0];
     const today = new Date().toISOString();
     const fileName = `pending_tasks_${today}.xlsx`;
-
+    
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
@@ -248,7 +245,7 @@ app.post('/api/upload-phones', upload.single('csv'), (req, res) => {
       db.prepare(`
         INSERT INTO technicians (name, phone) VALUES (?, ?)
         ON CONFLICT(name) DO UPDATE SET phone=excluded.phone
-      `).run(name, phone);
+        `).run(name, phone);
       count++;
     }
   });
@@ -361,7 +358,7 @@ app.post('/api/send', async (req, res) => {
       sendErrors.push({ technician: techData.name, reason: `Send failed: ${err.message}` });
     }
   }
-
+  
   // Persist skipped and sendErrors into send_reports for frontend visibility
   const insertReport = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
   const now = new Date().toISOString();
@@ -371,7 +368,7 @@ app.post('/api/send', async (req, res) => {
   for (const e of sendErrors) {
     insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
   }
-
+  
   res.json({
     success: true,
     sent,
@@ -385,7 +382,7 @@ app.get('/api/send-reports', (req, res) => {
   // Aggregate by matched_name or technician_name to keep frontend simple
   const rows = db.prepare(`
     SELECT COALESCE(matched_name, technician_name, 'Unknown') as name,
-      COUNT(*) as count,
+    COUNT(*) as count,
       MAX(created_at) as last_seen
     FROM send_reports
     GROUP BY name
@@ -448,12 +445,12 @@ function levenshtein(a, b) {
 function findBestMatchDetailed(name, technicians) {
   const norm = normalizeName(name || '');
   if (!norm) return { technician: null, reason: 'empty name' };
-
+  
   // exact normalized match
   for (const t of technicians) {
     if (normalizeName(t.name) === norm) return { technician: t };
   }
-
+  
   // contains match or startsWith
   for (const t of technicians) {
     const tn = normalizeName(t.name);
@@ -472,12 +469,12 @@ function findBestMatchDetailed(name, technicians) {
       best = t;
     }
   }
-
+  
   // If relative distance is small enough, suggest as typo; threshold 0.4
   if (best && bestScore <= 0.4) {
     return { technician: best, reason: 'possible typo', suggestion: best.name };
   }
-
+  
   return { technician: null, reason: 'no good match', suggestion: best?.name || null };
 }
 
@@ -486,32 +483,36 @@ app.get('/api/stats', (req, res) => {
   // Only return messages sent today and messages sent in last 30 days per request
   const sentToday = db.prepare(`
     SELECT COUNT(*) as count FROM messages WHERE date(sent_at) = date(?)
-  `).get(new Date().toISOString()).count;
-
-  const sentLast30 = db.prepare(`
-    SELECT COUNT(*) as count FROM messages WHERE sent_at >= datetime(?, '-30 days')
-  `).get(new Date().toISOString()).count;
-
-  res.json({ sentToday, sentLast30 });
-});
-
-app.listen(process.env.PORT || 5000, () => {
-  console.log(`Backend running on port ${process.env.PORT || 5000}`);
-});
-
-// Technician leaderboard: pending task counts per technician
-app.get('/api/tech-leaderboard', (req, res) => {
-  try {
-    const rows = db.prepare(`
+    `).get(new Date().toISOString()).count;
+    
+    const sentLast30 = db.prepare(`
+      SELECT COUNT(*) as count FROM messages WHERE sent_at >= datetime(?, '-30 days')
+      `).get(new Date().toISOString()).count;
+      
+      res.json({ sentToday, sentLast30 });
+    });
+    
+    
+    // Technician leaderboard: pending task counts per technician
+    app.get('/api/tech-leaderboard', (req, res) => {
+      try {
+        const rows = db.prepare(`
       SELECT technician_name, COUNT(*) as pending
       FROM tasks
       WHERE resolved_at IS NULL AND line_item_status = 'New'
       GROUP BY technician_name
       ORDER BY pending DESC
-    `).all();
+      `).all();
     res.json(rows);
   } catch (err) {
     console.error('Leaderboard error:', err.message);
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
+});
+app.get("/",(req,res)=>{
+  console.log("Nilesh dont forget you are a KAMAL");
+  res.end("Nilesh dont forget you are a KAMAL");
+});
+app.listen(process.env.PORT || 5000, () => {
+  console.log(`Backend running on port ${process.env.PORT || 5000}`);
 });
