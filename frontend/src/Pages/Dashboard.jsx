@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { useAppContext } from "../context/AppContext";
 
-const API = "http://localhost:5000/api";
+const API =  import.meta.env.VITE_API_URL;
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
