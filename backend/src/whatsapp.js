@@ -10,8 +10,12 @@ let isReady = false;
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: './session' }),
   puppeteer: {
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    protocolTimeout: 300_000, // 5 minutes adjust this as need beaucse this is 
+     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    headless: true,
+    protocolTimeout: 300000,
+    // 5 minutes adjust this as need beaucse this is 
+    args: ['--no-sandbox', '--disable-setuid-sandbox',  "--disable-dev-shm-usage",
+      "--disable-gpu"],
     //done beacuse for bundelling  the parser so that pupter does not timeout during the parsing 
   },
 });
