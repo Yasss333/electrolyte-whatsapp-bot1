@@ -26,7 +26,7 @@ function cleanLockFiles(sessionPath) {
         }
     }
 }
-
+console.log('🧹 CLEAN LOCK FILES FUNCTION EXECUTED AT ' + new Date().toISOString());
 const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
 const sessionPath = path.resolve(sessionBasePath);
 cleanLockFiles(sessionBasePath);
