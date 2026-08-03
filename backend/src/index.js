@@ -9,6 +9,9 @@ const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, get
 const { parseAndUpsertCSV } = require('./csvParser');
 const { startScheduler } = require('./scheduler');
 const db = require('./db');
+// ═══════════════════════════════════════════════════
+//  DEPLOYMENT VERSION: v2.0.0 – LOCK FIX + CLIENTID REMOVED
+// ═══════════════════════════════════════════════════
 console.log("Latest",Date.now());
 
 
