@@ -56,7 +56,7 @@ for (const file of lockFiles) {
 console.log(`WhatsApp session path: ${sessionPath}`);
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: sessionPath }),
+  authStrategy: new LocalAuth({ dataPath: sessionPath , clientId: 'main-bot' }),
   puppeteer: {
      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,

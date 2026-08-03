@@ -9,6 +9,8 @@ const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, get
 const { parseAndUpsertCSV } = require('./csvParser');
 const { startScheduler } = require('./scheduler');
 const db = require('./db');
+console.log("Latest",Date.now());
+
 
 const app = express();
 const allowedOrigins = [
