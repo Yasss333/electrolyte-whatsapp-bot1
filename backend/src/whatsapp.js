@@ -12,8 +12,24 @@ let qrGenerated = false;
 let connectionState = 'initializing';
 let lastError = null;
 
+function cleanLockFiles(sessionPath) {
+    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+    for (const file of lockFiles) {
+        const filePath = path.join(sessionPath, file);
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+                console.log(`🧹 Removed stale lock file: ${file}`);
+            } catch (err) {
+                console.log(`⚠️ Could not remove ${file}:`, err.message);
+            }
+        }
+    }
+}
+
 const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
 const sessionPath = path.resolve(sessionBasePath);
+cleanLockFiles(sessionBasePath);
 
 // Ensure the session directory exists
 fs.mkdirSync(sessionPath, { recursive: true });
