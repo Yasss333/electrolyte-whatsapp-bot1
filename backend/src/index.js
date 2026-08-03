@@ -392,75 +392,163 @@ app.delete('/api/technicians/:id', (req, res) => {
 });
 
 // Bulk send – group tasks by technician, send one image per technician
+// app.post('/api/send', async (req, res) => {
+//   const pendingTasks = db.prepare(`
+//     SELECT * FROM tasks 
+//     WHERE resolved_at IS NULL AND line_item_status = 'New'
+//   `).all();
+//   const technicians = db.prepare('SELECT * FROM technicians').all();
+//   // We'll build groups and also capture unmatched/skipped reasons for admin
+//   const groups = new Map();
+//   const skipped = [];
+
+//   for (const task of pendingTasks) {
+//     const techName = task.technician_name || '';
+//     const match = findBestMatchDetailed(techName, technicians);
+//     if (!match || !match.technician) {
+//       skipped.push({
+//         technicianName: techName,
+//         reason: match?.reason || 'name not found',
+//         suggestion: match?.suggestion || null,
+//         case_number: task.case_number
+//       });
+//       continue;
+//     }
+
+//     const tech = match.technician;
+//     // validate phone: simple numeric length check (10 digits expected)
+//     const phoneDigits = (tech.phone || '').replace(/\D/g, '');
+//     if (phoneDigits.length < 10) {
+//       skipped.push({
+//         technicianName: techName,
+//         matchedTo: tech.name,
+//         reason: 'invalid phone make sure it  is 10 digits',
+//         phone: tech.phone,
+//         case_number: task.case_number
+//       });
+//       continue;
+//     }
+//     if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
+//     groups.get(tech.id).tasks.push(task);
+//   }
+
+//   let sent = 0;
+//   const sendErrors = [];
+
+//   for (const [techId, techData] of groups) {
+//     try {
+//       await sendTaskReminders(techData.tasks, techData.phone);
+//       sent++;
+//     } catch (err) {
+//       sendErrors.push({ technician: techData.name, reason: `Send failed: ${err.message}` });
+//     }
+//   }
+  
+//   // Persist skipped and sendErrors into send_reports for frontend visibility
+//   const insertReport = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+//   const now = new Date().toISOString();
+//   for (const s of skipped) {
+//     insertReport.run(now, s.technicianName || null, s.matchedTo || s.matched_name || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
+//   }
+//   for (const e of sendErrors) {
+//     insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
+//   }
+  
+//   res.json({
+//     success: true,
+//     sent,
+//     skipped: skipped.length + sendErrors.length,
+//     details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
+//   });
+// });
+
 app.post('/api/send', async (req, res) => {
-  const pendingTasks = db.prepare(`
-    SELECT * FROM tasks 
-    WHERE resolved_at IS NULL AND line_item_status = 'New'
-  `).all();
-  const technicians = db.prepare('SELECT * FROM technicians').all();
-  // We'll build groups and also capture unmatched/skipped reasons for admin
-  const groups = new Map();
-  const skipped = [];
-
-  for (const task of pendingTasks) {
-    const techName = task.technician_name || '';
-    const match = findBestMatchDetailed(techName, technicians);
-    if (!match || !match.technician) {
-      skipped.push({
-        technicianName: techName,
-        reason: match?.reason || 'name not found',
-        suggestion: match?.suggestion || null,
-        case_number: task.case_number
-      });
-      continue;
+  try {
+    // Quick health check
+    if (!getStatus()) {
+      return res.status(503).json({ success: false, error: 'WhatsApp client is not connected' });
     }
 
-    const tech = match.technician;
-    // validate phone: simple numeric length check (10 digits expected)
-    const phoneDigits = (tech.phone || '').replace(/\D/g, '');
-    if (phoneDigits.length < 10) {
-      skipped.push({
-        technicianName: techName,
-        matchedTo: tech.name,
-        reason: 'invalid phone make sure it  is 10 digits',
-        phone: tech.phone,
-        case_number: task.case_number
-      });
-      continue;
-    }
-    if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
-    groups.get(tech.id).tasks.push(task);
-  }
+    const pendingTasks = db.prepare(`
+      SELECT * FROM tasks 
+      WHERE resolved_at IS NULL AND line_item_status = 'New'
+    `).all();
+    const technicians = db.prepare('SELECT * FROM technicians').all();
 
-  let sent = 0;
-  const sendErrors = [];
+    const groups = new Map();
+    const skipped = [];
 
-  for (const [techId, techData] of groups) {
-    try {
-      await sendTaskReminders(techData.tasks, techData.phone);
-      sent++;
-    } catch (err) {
-      sendErrors.push({ technician: techData.name, reason: `Send failed: ${err.message}` });
+    // Group tasks by technician (using your existing matching)
+    for (const task of pendingTasks) {
+      const techName = task.technician_name || '';
+      const match = findBestMatchDetailed(techName, technicians);
+      if (!match || !match.technician) {
+        skipped.push({
+          technicianName: techName,
+          reason: match?.reason || 'name not found',
+          suggestion: match?.suggestion || null,
+          case_number: task.case_number
+        });
+        continue;
+      }
+      const tech = match.technician;
+      const phoneDigits = (tech.phone || '').replace(/\D/g, '');
+      if (phoneDigits.length < 10) {
+        skipped.push({
+          technicianName: techName,
+          matchedTo: tech.name,
+          reason: 'invalid phone (must be 10 digits)',
+          case_number: task.case_number
+        });
+        continue;
+      }
+      if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
+      groups.get(tech.id).tasks.push(task);
     }
+
+    let sent = 0;
+    const sendErrors = [];
+    const techTimeout = 60000; // 60 seconds per technician
+
+    for (const [techId, techData] of groups) {
+      try {
+        // Send with a per‑technician timeout
+        await Promise.race([
+          sendTaskReminders(techData.tasks, techData.phone),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), techTimeout))
+        ]);
+        sent++;
+      } catch (err) {
+        sendErrors.push({ technician: techData.name, reason: err.message });
+        console.error(`Send error for ${techData.name}:`, err.message);
+      }
+    }
+
+    // Log skipped and errors to send_reports (optional)
+    const insertReport = db.prepare(`
+      INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    for (const s of skipped) {
+      insertReport.run(now, s.technicianName || null, s.matchedTo || null, null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
+    }
+    for (const e of sendErrors) {
+      insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
+    }
+
+    res.json({
+      success: true,
+      sent,
+      skipped: skipped.length + sendErrors.length,
+      details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
+    });
+  } catch (err) {
+    console.error('Bulk send error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
-  
-  // Persist skipped and sendErrors into send_reports for frontend visibility
-  const insertReport = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  const now = new Date().toISOString();
-  for (const s of skipped) {
-    insertReport.run(now, s.technicianName || null, s.matchedTo || s.matched_name || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
-  }
-  for (const e of sendErrors) {
-    insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
-  }
-  
-  res.json({
-    success: true,
-    sent,
-    skipped: skipped.length + sendErrors.length,
-    details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
-  });
 });
+
 
 // Return recent send reports (skipped/errors) for frontend dashboard
 app.get('/api/send-reports', (req, res) => {

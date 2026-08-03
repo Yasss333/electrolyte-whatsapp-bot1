@@ -124,12 +124,44 @@ client.on('disconnected', (reason) => {
 });
 
 // === sendTaskReminders (unchanged) ===
+
+async function waitForReady(timeout = 30000) {
+  if (isReady && client.info) return true;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Client readiness timeout')), timeout);
+    const readyHandler = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    client.once('ready', readyHandler);
+    client.once('auth_failure', () => {
+      clearTimeout(timer);
+      reject(new Error('Authentication failed'));
+    });
+    client.once('disconnected', () => {
+      clearTimeout(timer);
+      reject(new Error('Client disconnected'));
+    });
+  });
+}
+
+// === sendTaskReminders with readiness check and timeout ===
 async function sendTaskReminders(tasks, phone) {
   try {
+    // Wait for client to be fully ready (with 30s timeout)
+    await waitForReady(30000);
+
     const technicianName = tasks[0].technician_name;
     const imagePath = generateTasksCard(tasks, technicianName);
     const media = MessageMedia.fromFilePath(imagePath);
     const chatId = `91${phone}@c.us`;
+
+    // Optional: pre-check chat exists (catches "getChat" errors early)
+    try {
+      await client.getChatById(chatId);
+    } catch (chatErr) {
+      throw new Error(`Chat not found: ${chatErr.message}`);
+    }
 
     const taskList = tasks.map(t =>
       `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
@@ -137,14 +169,43 @@ async function sendTaskReminders(tasks, phone) {
 
     const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
 
-    await client.sendMessage(chatId, media, { caption });
-    console.log(`Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
+    // Send with a hard timeout (60s)
+    await Promise.race([
+      client.sendMessage(chatId, media, { caption }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), 60000))
+    ]);
+
+    console.log(`✅ Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
     await new Promise((res) => setTimeout(res, 4000));
   } catch (err) {
-    console.error(`Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
+    console.error(`❌ Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
+    // Rethrow so the main loop records the failure
     throw err;
   }
 }
+
+
+// async function sendTaskReminders(tasks, phone) {
+//   try {
+//     const technicianName = tasks[0].technician_name;
+//     const imagePath = generateTasksCard(tasks, technicianName);
+//     const media = MessageMedia.fromFilePath(imagePath);
+//     const chatId = `91${phone}@c.us`;
+
+//     const taskList = tasks.map(t =>
+//       `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
+//     ).join('\n');
+
+//     const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
+
+//     await client.sendMessage(chatId, media, { caption });
+//     console.log(`Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
+//     await new Promise((res) => setTimeout(res, 4000));
+//   } catch (err) {
+//     console.error(`Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
+//     throw err;
+//   }
+// }
 
 // === Exports ===
 function getQRCode() { return qrCodeBase64; }
