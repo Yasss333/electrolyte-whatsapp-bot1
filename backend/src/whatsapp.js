@@ -4,7 +4,6 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const { generateTasksCard } = require('./imageGenerator');
-const db = require('./db');
 
 let qrCodeBase64 = null;
 let isReady = false;
@@ -12,12 +11,9 @@ let qrGenerated = false;
 let connectionState = 'initializing';
 let lastError = null;
 
-// === Path: use ../data as base and 'session' as clientId ===
-const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data');
-const sessionFolder = 'session';
-const sessionPath = path.join(sessionBasePath, sessionFolder);
-
-// Ensure the session directory exists
+// === Path: exactly the session folder ===
+const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
+const sessionPath = path.resolve(sessionBasePath);
 fs.mkdirSync(sessionPath, { recursive: true });
 
 console.log(`🧹 CLEAN LOCK FILES EXECUTED AT ${new Date().toISOString()}`);
@@ -40,7 +36,7 @@ function cleanLockFiles() {
 }
 cleanLockFiles();
 
-// === Delete whole session folder (for manual reset) ===
+// === Delete entire session (for reset) ===
 function deleteSessionFolder() {
     try {
         fs.rmSync(sessionPath, { recursive: true, force: true });
@@ -50,12 +46,9 @@ function deleteSessionFolder() {
     }
 }
 
-// === Client with CORRECT LocalAuth ===
+// === Client – NO `clientId`, uses `sessionPath` directly ===
 const client = new Client({
-  authStrategy: new LocalAuth({
-    dataPath: sessionBasePath,   // points to ../data
-    clientId: sessionFolder,     // 'session' – so final path is ../data/session
-  }),
+  authStrategy: new LocalAuth({ dataPath: sessionPath }), // exact folder, no subfolder
   puppeteer: {
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
@@ -69,7 +62,7 @@ const client = new Client({
   },
 });
 
-// === Retry logic with auto-delete if lock persists ===
+// === Retry with auto‑delete if lock error persists ===
 const originalInit = client.initialize.bind(client);
 client.initialize = async function() {
   cleanLockFiles();
@@ -77,7 +70,7 @@ client.initialize = async function() {
     await originalInit();
   } catch (err) {
     if (err.message && err.message.includes('profile appears to be in use')) {
-      console.log('🔁 Lock error – deleting session folder and retrying...');
+      console.log('🔁 Lock error – deleting session and retrying...');
       deleteSessionFolder();
       fs.mkdirSync(sessionPath, { recursive: true });
       cleanLockFiles();
@@ -88,7 +81,7 @@ client.initialize = async function() {
   }
 };
 
-// === Event handlers ===
+// === Event handlers (unchanged) ===
 client.on('qr', async (qr) => {
   if (!qrGenerated) {
     qrcode.generate(qr, { small: true });

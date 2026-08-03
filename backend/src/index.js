@@ -28,6 +28,20 @@ app.post('/api/reset-session', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+app.post('/api/logout', async (req, res) => {
+  try {
+    const { resetSession, client } = require('./whatsapp');
+    if (client && client.destroy) {
+      await client.destroy();
+    }
+    resetSession();
+    res.json({ success: true, message: 'Logged out successfully' });
+  } catch (err) {
+    console.error('Logout error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 const allowedOrigins = [
   
    "https://electrolyte-whatsapp-bot1-czac.vercel.app",
