@@ -12,8 +12,19 @@ let qrGenerated = false;
 let connectionState = 'initializing';
 let lastError = null;
 
-// === Path and lock cleanup ===
-function cleanLockFiles(sessionPath) {
+// === Path: use ../data as base and 'session' as clientId ===
+const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data');
+const sessionFolder = 'session';
+const sessionPath = path.join(sessionBasePath, sessionFolder);
+
+// Ensure the session directory exists
+fs.mkdirSync(sessionPath, { recursive: true });
+
+console.log(`🧹 CLEAN LOCK FILES EXECUTED AT ${new Date().toISOString()}`);
+console.log(`WhatsApp session path: ${sessionPath}`);
+
+// === Clean lock files ===
+function cleanLockFiles() {
     const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
     for (const file of lockFiles) {
         const filePath = path.join(sessionPath, file);
@@ -27,19 +38,24 @@ function cleanLockFiles(sessionPath) {
         }
     }
 }
+cleanLockFiles();
 
-const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
-const sessionPath = path.resolve(sessionBasePath);
-fs.mkdirSync(sessionPath, { recursive: true });
+// === Delete whole session folder (for manual reset) ===
+function deleteSessionFolder() {
+    try {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log(`🗑️ Deleted entire session folder: ${sessionPath}`);
+    } catch (err) {
+        console.error(`❌ Failed to delete session folder: ${err.message}`);
+    }
+}
 
-// Clean locks once at startup
-cleanLockFiles(sessionPath);
-console.log(`🧹 CLEAN LOCK FILES EXECUTED AT ${new Date().toISOString()}`);
-console.log(`WhatsApp session path: ${sessionPath}`);
-
-// === Client with retry override ===
+// === Client with CORRECT LocalAuth ===
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: sessionPath }), // ❌ no clientId – avoids extra subfolder
+  authStrategy: new LocalAuth({
+    dataPath: sessionBasePath,   // points to ../data
+    clientId: sessionFolder,     // 'session' – so final path is ../data/session
+  }),
   puppeteer: {
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
@@ -53,27 +69,26 @@ const client = new Client({
   },
 });
 
-// 🔁 Override initialize to clean locks right before launch and retry once if needed
+// === Retry logic with auto-delete if lock persists ===
 const originalInit = client.initialize.bind(client);
 client.initialize = async function() {
-  // Clean locks just before launch (catches any new lock files)
-  cleanLockFiles(sessionPath);
-
+  cleanLockFiles();
   try {
     await originalInit();
   } catch (err) {
     if (err.message && err.message.includes('profile appears to be in use')) {
-      console.log('🔁 Lock error – cleaning locks and retrying...');
-      cleanLockFiles(sessionPath);
-      // Retry once
-      await originalInit();
+      console.log('🔁 Lock error – deleting session folder and retrying...');
+      deleteSessionFolder();
+      fs.mkdirSync(sessionPath, { recursive: true });
+      cleanLockFiles();
+      await originalInit(); // retry once
     } else {
       throw err;
     }
   }
 };
 
-// === Event handlers (unchanged) ===
+// === Event handlers ===
 client.on('qr', async (qr) => {
   if (!qrGenerated) {
     qrcode.generate(qr, { small: true });
@@ -143,5 +158,15 @@ function getQRCode() { return qrCodeBase64; }
 function getStatus() { return isReady; }
 function getConnectionState() { return connectionState; }
 function getLastError() { return lastError; }
+function resetSession() {
+  deleteSessionFolder();
+  fs.mkdirSync(sessionPath, { recursive: true });
+  qrCodeBase64 = null;
+  isReady = false;
+  qrGenerated = false;
+  connectionState = 'initializing';
+  lastError = null;
+  console.log('🔁 Session reset. Please scan QR again.');
+}
 
-module.exports = { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError };
+module.exports = { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError, resetSession };

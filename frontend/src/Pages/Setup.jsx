@@ -37,10 +37,41 @@ export default function Setup() {
     return () => clearInterval(interval);
   }, []);
 
+const refreshQR = async () => {
+  await axios.post(`${API}/reset-session`);
+  setStatus("Session reset. New QR will appear shortly...");
+  setQr(null);
+  setConnected(false);
+  // Force re-poll
+  setTimeout(() => poll(), 2000);
+};
+
+const logout = async () => {
+  if (!confirm("Logout from WhatsApp? This will disconnect the bot.")) return;
+  await axios.post(`${API}/logout`);
+  setStatus("Logged out. Please scan QR again.");
+  setQr(null);
+  setConnected(false);
+  setTimeout(() => poll(), 2000);
+};
+
   return (
     <div className="max-w-md mx-auto text-center space-y-6">
       <h1 className="text-2xl font-bold text-orange-500">WhatsApp Setup</h1>
-
+      <div className="flex gap-4 justify-center mt-4">
+  <button
+    onClick={refreshQR}
+    className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg text-sm font-medium"
+  >
+    🔄 Refresh QR
+  </button>
+  <button
+    onClick={logout}
+    className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-medium"
+  >
+    🚪 Logout
+  </button>
+</div>
       {connected ? (
         <div className="bg-green-500/20 border border-green-500 rounded-xl p-8">
           <p className="text-green-400 text-4xl mb-2">✅</p>

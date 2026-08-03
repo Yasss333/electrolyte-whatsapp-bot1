@@ -14,8 +14,20 @@ const db = require('./db');
 // ═══════════════════════════════════════════════════
 console.log("Latest",Date.now());
 
-
+// Manually reset WhatsApp session – deletes session folder and restarts client
 const app = express();
+app.post('/api/reset-session', async (req, res) => {
+  try {
+    const { resetSession } = require('./whatsapp');
+    resetSession();
+    // Reinitialize the client after reset
+    await client.initialize();
+    res.json({ success: true, message: 'Session reset. Please scan QR again.' });
+  } catch (err) {
+    console.error('Reset error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 const allowedOrigins = [
   
    "https://electrolyte-whatsapp-bot1-czac.vercel.app",
