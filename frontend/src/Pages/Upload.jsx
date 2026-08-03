@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
-const API = import.meta.env.VITE_API_URL;
+const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
 
 export default function Upload() {
   const { tasks, setTasks, technicians, setTechnicians, triggerRefresh } = useAppContext();
@@ -25,14 +25,27 @@ export default function Upload() {
   }, []); // only once
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file) {
+      setStatus("⚠️ Choose a CSV file before loading tasks.");
+      return;
+    }
+
+    setStatus("Uploading and parsing CSV...");
     const form = new FormData();
     form.append("csv", file);
-    await axios.post(`${API}/upload`, form);
-    const res = await axios.get(`${API}/tasks`);
-    setTasks(res.data);
-    setStatus(`${res.data.length} pending tasks loaded`);
-    triggerRefresh(); // refresh dashboard stats
+
+    try {
+      const uploadRes = await axios.post(`${API}/upload`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const taskRes = await axios.get(`${API}/tasks`);
+      setTasks(taskRes.data || []);
+      setStatus(`✅ ${uploadRes.data.pendingCount ?? taskRes.data.length} pending task(s) loaded`);
+      triggerRefresh();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || "Upload failed";
+      setStatus(`❌ ${message}`);
+    }
   };
 
   const handleBulkSend = async () => {

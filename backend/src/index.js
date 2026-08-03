@@ -5,20 +5,42 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const { client, sendTaskReminders, getQRCode, getStatus } = require('./whatsapp');
+const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError } = require('./whatsapp');
 const { parseAndUpsertCSV } = require('./csvParser');
 const { startScheduler } = require('./scheduler');
 const db = require('./db');
 
 const app = express();
-// app.use(cors({
-//   origin: "https://electrolyte-whatsapp-bot1-czac.vercel.app/",
-//   credentials: true,
-// }));
-app.use(cors());
+const allowedOrigins = [
+  
+   "https://electrolyte-whatsapp-bot1-czac.vercel.app",
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
-const upload = multer({ dest: path.join(__dirname, '../data/tmp/') });
+const upload = multer({
+  dest: path.join(__dirname, '../data/tmp/'),
+  fileFilter: (req, file, callback) => {
+    if (file && (file.mimetype === 'text/csv' || file.originalname.toLowerCase().endsWith('.csv'))) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Only CSV files are allowed'));
+  },
+});
 
 try {
   client.initialize();
@@ -51,18 +73,46 @@ async function initializeDataFromCsv() {
 
 // initializeDataFromCsv();
 
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, connected: getStatus(), state: getConnectionState() });
+});
+
 // QR Code endpoint
 app.get('/api/qr', (req, res) => {
+  const ready = getStatus();
+  const state = getConnectionState();
   res.json({
     qr: getQRCode(),
-    connected: getStatus(),
+    connected: ready || state === 'authenticated',  // fallback
+    state: state,
+    error: getLastError(),
   });
 });
 
 
+
+// these are the command given by the os to te nodejs backend like sigterm si signalterminate , si is signal interuppt ex: when you press ctrl+c
+
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM, cleaning up...');
+  await client.destroy();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT, cleaning up...');
+  await client.destroy();
+  process.exit(0);
+});
+
 // Upload task CSV – clear existing tasks first
 app.post('/api/upload', upload.single('csv'), async (req, res) => {
   const dest = path.join(__dirname, '../data/input.csv');
+
+  if (!req.file?.path) {
+    return res.status(400).json({ error: 'Please choose a CSV file before uploading.' });
+  }
+
   try {
     if (fs.existsSync(dest)) {
       fs.unlinkSync(dest);

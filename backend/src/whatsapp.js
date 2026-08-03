@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
@@ -7,9 +9,38 @@ const db = require('./db');
 let qrCodeBase64 = null;
 let isReady = false;
 let qrGenerated = false;
+let connectionState = 'initializing';
+let lastError = null;
+
+const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
+const sessionPath = path.resolve(sessionBasePath);
+
+// Ensure the session directory exists
+fs.mkdirSync(sessionPath, { recursive: true });
+
+// const sessionPath = path.join(__dirname, '../data/session');
+// fs.mkdirSync(sessionPath, { recursive: true });
+
+//cleanup function for railways deployment or any container based deployment  , this is wriitenn to lockout the session f
+// from previos session also a prestart commans is added 
+// Clean up Chromium lock files before starting
+const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+for (const file of lockFiles) {
+  const filePath = path.join(sessionPath, file);
+  if (fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+      console.log(`🧹 Removed stale lock file: ${file}`);
+    } catch (err) {
+      console.log(`⚠️ Could not remove ${file}:`, err.message);
+    }
+  }
+}
+
+console.log(`WhatsApp session path: ${sessionPath}`);
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: '/app/data/session' }),
+  authStrategy: new LocalAuth({ dataPath: sessionPath }),
   puppeteer: {
      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
@@ -27,6 +58,8 @@ client.on('qr', async (qr) => {
     qrCodeBase64 = await QRCode.toDataURL(qr);
     qrGenerated = true;
     isReady = false;
+    connectionState = 'qr';
+    lastError = null;
     console.log('QR generated and stored');
   } else {
     console.log('QR regenerated, ignoring');
@@ -37,12 +70,26 @@ client.on('ready', () => {
   isReady = true;
   qrCodeBase64 = null;   // clear QR after successful connection
   qrGenerated = false;   // allow new QR if disconnected later
+  connectionState = 'ready';
+  lastError = null;
   console.log('WhatsApp client ready');
 });
 
+client.on('authenticated', () => {
+  connectionState = 'authenticated';
+  lastError = null;
+});
 
-client.on('disconnected', () => {
+client.on('auth_failure', (message) => {
+  connectionState = 'auth_failure';
+  lastError = message || 'Authentication failed';
+  console.error('WhatsApp authentication failed:', message);
+});
+
+client.on('disconnected', (reason) => {
   isReady = false;
+  connectionState = 'disconnected';
+  lastError = reason || 'Disconnected';
   console.log('WhatsApp disconnected');
 });
 
@@ -106,5 +153,7 @@ const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):
 
 function getQRCode() { return qrCodeBase64; }
 function getStatus() { return isReady; }
+function getConnectionState() { return connectionState; }
+function getLastError() { return lastError; }
 
-module.exports = { client, sendTaskReminders, getQRCode, getStatus };
+module.exports = { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError };

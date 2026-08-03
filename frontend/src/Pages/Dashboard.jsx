@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
-import {
-  BarChart, Bar,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
-} from "recharts";
 import { useAppContext } from "../context/AppContext";
 
-const API =  import.meta.env.VITE_API_URL;
+const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -62,8 +58,6 @@ export default function Dashboard() {
     </div>
   );
 
-  const COLORS = ['#f97316', '#22c55e', '#3b82f6', '#ef4444'];
-
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
@@ -95,14 +89,23 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4">
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
           <h2 className="text-sm font-semibold text-slate-300 mb-4">Technician Leaderboard (Pending Tasks)</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={leaderboard.slice(0, 10)} layout="vertical" margin={{ left: 10, right: 10 }}>
-              <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-              <YAxis dataKey="technician_name" type="category" width={180} tick={{ fill: '#94a3b8', fontSize: 12 }} />
-              <Tooltip contentStyle={{ background: '#1e293b', border: 'none' }} />
-              <Bar dataKey="pending" radius={[4, 4, 0, 0]} fill="#f97316" />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="space-y-3">
+            {leaderboard.slice(0, 10).map((entry, index) => {
+              const max = Math.max(...leaderboard.map((item) => Number(item.pending) || 0), 1);
+              const width = `${Math.max(8, (Number(entry.pending) / max) * 100)}%`;
+              return (
+                <div key={`${entry.technician_name || "tech"}-${index}`}>
+                  <div className="flex justify-between text-sm text-slate-300 mb-1">
+                    <span>{entry.technician_name || "Unassigned"}</span>
+                    <span className="text-orange-400">{entry.pending || 0}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+                    <div className="h-full rounded-full bg-orange-500" style={{ width }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

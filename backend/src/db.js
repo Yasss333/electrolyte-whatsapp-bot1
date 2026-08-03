@@ -40,14 +40,16 @@ db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
   updated_at TEXT
 )`).run();
 
-// db.prepare(`CREATE TABLE IF NOT EXISTS messages (
-//   id INTEGER PRIMARY KEY AUTOINCREMENT,
-//   technician_name TEXT,
-//   phone TEXT,
-//   case_number TEXT,
-//   sent_at TEXT,
-//   status TEXT
-// )`).run();
+db.prepare(`CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  technician_name TEXT,
+  phone TEXT,
+  case_number TEXT,
+  sent_at TEXT,
+  status TEXT
+)`).run();
+
+db.prepare(`CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at)`).run();
 
 // db.prepare(`CREATE TABLE IF NOT EXISTS replies (
 //   id INTEGER PRIMARY KEY AUTOINCREMENT,
