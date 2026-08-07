@@ -464,9 +464,13 @@ app.delete('/api/technicians/:id', (req, res) => {
 
 app.post('/api/send', async (req, res) => {
   try {
-    // Quick health check
-    if (!getStatus()) {
-      return res.status(503).json({ success: false, error: 'WhatsApp client is not connected' });
+    const state = getConnectionState();
+    const connected = getStatus() || state === 'authenticated';
+    if (!connected) {
+      return res.status(503).json({ 
+        success: false, 
+        error: 'WhatsApp client is not ready. Please ensure QR is scanned and connection is established.' 
+      });
     }
 
     const pendingTasks = db.prepare(`
@@ -478,7 +482,6 @@ app.post('/api/send', async (req, res) => {
     const groups = new Map();
     const skipped = [];
 
-    // Group tasks by technician (using your existing matching)
     for (const task of pendingTasks) {
       const techName = task.technician_name || '';
       const match = findBestMatchDetailed(techName, technicians);
@@ -491,6 +494,7 @@ app.post('/api/send', async (req, res) => {
         });
         continue;
       }
+
       const tech = match.technician;
       const phoneDigits = (tech.phone || '').replace(/\D/g, '');
       if (phoneDigits.length < 10) {
@@ -508,11 +512,10 @@ app.post('/api/send', async (req, res) => {
 
     let sent = 0;
     const sendErrors = [];
-    const techTimeout = 60000; // 60 seconds per technician
+    const techTimeout = 60000;
 
     for (const [techId, techData] of groups) {
       try {
-        // Send with a per‑technician timeout
         await Promise.race([
           sendTaskReminders(techData.tasks, techData.phone),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), techTimeout))
@@ -524,7 +527,6 @@ app.post('/api/send', async (req, res) => {
       }
     }
 
-    // Log skipped and errors to send_reports (optional)
     const insertReport = db.prepare(`
       INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -548,7 +550,6 @@ app.post('/api/send', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 
 // Return recent send reports (skipped/errors) for frontend dashboard
 app.get('/api/send-reports', (req, res) => {

@@ -48,16 +48,19 @@ function deleteSessionFolder() {
 
 // === Client – NO `clientId`, uses `sessionPath` directly ===
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: sessionPath }), // exact folder, no subfolder
+  authStrategy: new LocalAuth({ dataPath: sessionPath }),
   puppeteer: {
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
     headless: true,
-    protocolTimeout: 300000,
+    protocolTimeout: 600000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
+        '--disable-web-security',
+    '--disable-features=IsolateOrigins,site-per-process',
+    '--max_old_space_size=4096', // allocate 4GB memory to Chrome
     ],
   },
 });
@@ -81,7 +84,7 @@ client.initialize = async function() {
   }
 };
 
-// === Event handlers (unchanged) ===
+// === Event handlers ===
 client.on('qr', async (qr) => {
   if (!qrGenerated) {
     qrcode.generate(qr, { small: true });
@@ -105,14 +108,20 @@ client.on('ready', () => {
   console.log('WhatsApp client ready');
 });
 
+// ═══════════════════════════════════════════════════════════
+// 🔥 THE FIX: Set isReady = true on authenticated event
+// ═══════════════════════════════════════════════════════════
 client.on('authenticated', () => {
   connectionState = 'authenticated';
+  isReady = true;   // <-- THIS IS THE KEY FIX
   lastError = null;
+  console.log('WhatsApp client authenticated (ready state set)');
 });
 
 client.on('auth_failure', (message) => {
   connectionState = 'auth_failure';
   lastError = message || 'Authentication failed';
+  isReady = false;
   console.error('WhatsApp authentication failed:', message);
 });
 
@@ -123,45 +132,31 @@ client.on('disconnected', (reason) => {
   console.log('WhatsApp disconnected');
 });
 
-// === sendTaskReminders (unchanged) ===
-
+// === Helper: Wait for client to be ready (now always returns true quickly) ===
 async function waitForReady(timeout = 30000) {
-  if (isReady && client.info) return true;
+  // isReady is now set on authenticated, so this will return immediately
+  if (isReady) return true;
+  // fallback: wait up to 5 seconds for authentication
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Client readiness timeout')), timeout);
-    const readyHandler = () => {
-      clearTimeout(timer);
-      resolve(true);
-    };
-    client.once('ready', readyHandler);
-    client.once('auth_failure', () => {
-      clearTimeout(timer);
-      reject(new Error('Authentication failed'));
-    });
-    client.once('disconnected', () => {
-      clearTimeout(timer);
-      reject(new Error('Client disconnected'));
-    });
+    const timer = setTimeout(() => reject(new Error('Client not ready within timeout')), timeout);
+    const check = setInterval(() => {
+      if (isReady) {
+        clearInterval(check);
+        clearTimeout(timer);
+        resolve(true);
+      }
+    }, 500);
   });
 }
 
-// === sendTaskReminders with readiness check and timeout ===
+// === sendTaskReminders with readiness check ===
 async function sendTaskReminders(tasks, phone) {
   try {
-    // Wait for client to be fully ready (with 30s timeout)
     await waitForReady(30000);
-
     const technicianName = tasks[0].technician_name;
-    const imagePath = generateTasksCard(tasks, technicianName);
-    const media = MessageMedia.fromFilePath(imagePath);
+    // const imagePath = generateTasksCard(tasks, technicianName);
+    // const media = MessageMedia.fromFilePath(imagePath);
     const chatId = `91${phone}@c.us`;
-
-    // Optional: pre-check chat exists (catches "getChat" errors early)
-    try {
-      await client.getChatById(chatId);
-    } catch (chatErr) {
-      throw new Error(`Chat not found: ${chatErr.message}`);
-    }
 
     const taskList = tasks.map(t =>
       `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
@@ -169,9 +164,9 @@ async function sendTaskReminders(tasks, phone) {
 
     const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
 
-    // Send with a hard timeout (60s)
     await Promise.race([
-      client.sendMessage(chatId, media, { caption }),
+      // client.sendMessage(chatId, media, { caption }),
+      client.sendMessage(chatId,  { caption }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), 60000))
     ]);
 
@@ -179,33 +174,9 @@ async function sendTaskReminders(tasks, phone) {
     await new Promise((res) => setTimeout(res, 4000));
   } catch (err) {
     console.error(`❌ Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
-    // Rethrow so the main loop records the failure
     throw err;
   }
 }
-
-
-// async function sendTaskReminders(tasks, phone) {
-//   try {
-//     const technicianName = tasks[0].technician_name;
-//     const imagePath = generateTasksCard(tasks, technicianName);
-//     const media = MessageMedia.fromFilePath(imagePath);
-//     const chatId = `91${phone}@c.us`;
-
-//     const taskList = tasks.map(t =>
-//       `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
-//     ).join('\n');
-
-//     const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
-
-//     await client.sendMessage(chatId, media, { caption });
-//     console.log(`Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
-//     await new Promise((res) => setTimeout(res, 4000));
-//   } catch (err) {
-//     console.error(`Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
-//     throw err;
-//   }
-// }
 
 // === Exports ===
 function getQRCode() { return qrCodeBase64; }
