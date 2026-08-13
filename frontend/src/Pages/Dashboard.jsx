@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
-const baseUrl= (import.meta.env.VITE_API_URL + "api"  || "http://127.0.0.1:5000").replace(/\/$/, "");
-const API=baseUrl;
+const baseUrl= (import.meta.env.VITE_API_URL   || "http://127.0.0.1:5000").replace(/\/$/, "");
+const API=baseUrl +"api";
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [reports, setReports] = useState([]);
