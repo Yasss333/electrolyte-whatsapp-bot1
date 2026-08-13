@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:5000/api").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL  + "/api" || "http://127.0.0.1:5000/api").replace(/\/$/, "");
 
 export default function Setup() {
   const [qr, setQr] = useState(null);

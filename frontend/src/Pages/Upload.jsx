@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
-const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:5000").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL + "/api"  || "http://127.0.0.1:5000").replace(/\/$/, "");
 
 export default function Upload() {
   const { tasks, setTasks, technicians, setTechnicians, triggerRefresh } = useAppContext();
