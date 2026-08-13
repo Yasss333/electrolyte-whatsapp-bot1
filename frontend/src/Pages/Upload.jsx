@@ -3,7 +3,7 @@ import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
 const baseURL = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
-const API = baseURL + "/api";
+const API = baseURL ;
 export default function Upload() {
   const { tasks, setTasks, technicians, setTechnicians, triggerRefresh } = useAppContext();
   const [file, setFile] = useState(null);
