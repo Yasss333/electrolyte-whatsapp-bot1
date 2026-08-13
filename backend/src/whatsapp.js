@@ -1,87 +1,81 @@
 const path = require('path');
 const fs = require('fs');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { Client, RemoteAuth, LocalAuth } = require('whatsapp-web.js');
+const { MongoStore } = require('wwebjs-mongo');
+const mongoose = require('mongoose');
 const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
-const { generateTasksCard } = require('./imageGenerator');
 
 let qrCodeBase64 = null;
 let isReady = false;
 let qrGenerated = false;
 let connectionState = 'initializing';
 let lastError = null;
+let mongoConnected = false;
 
-// === Path: exactly the session folder ===
-const sessionBasePath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
-const sessionPath = path.resolve(sessionBasePath);
-fs.mkdirSync(sessionPath, { recursive: true });
-
-console.log(`🧹 CLEAN LOCK FILES EXECUTED AT ${new Date().toISOString()}`);
-console.log(`WhatsApp session path: ${sessionPath}`);
-
-// === Clean lock files ===
-function cleanLockFiles() {
-    const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
-    for (const file of lockFiles) {
-        const filePath = path.join(sessionPath, file);
-        if (fs.existsSync(filePath)) {
-            try {
-                fs.unlinkSync(filePath);
-                console.log(`🧹 Removed stale lock file: ${file}`);
-            } catch (err) {
-                console.log(`⚠️ Could not remove ${file}:`, err.message);
-            }
-        }
-    }
-}
-cleanLockFiles();
-
-// === Delete entire session (for reset) ===
-function deleteSessionFolder() {
-    try {
-        fs.rmSync(sessionPath, { recursive: true, force: true });
-        console.log(`🗑️ Deleted entire session folder: ${sessionPath}`);
-    } catch (err) {
-        console.error(`❌ Failed to delete session folder: ${err.message}`);
-    }
+// === MongoDB Connection ===
+async function connectMongo() {
+  if (mongoConnected) return;
+  if (!process.env.MONGODB_URI) {
+    console.warn('⚠️ MONGODB_URI not set, falling back to LocalAuth');
+    return;
+  }
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5000,
+    });
+    mongoConnected = true;
+    console.log('✅ MongoDB connected');
+  } catch (err) {
+    console.error('❌ MongoDB connection failed:', err.message);
+    throw err;
+  }
 }
 
-// === Client – NO `clientId`, uses `sessionPath` directly ===
+// === Create Client (without auth strategy yet) ===
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: sessionPath }),
   puppeteer: {
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    headless: 'new',
     protocolTimeout: 600000,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-        '--disable-web-security',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--max_old_space_size=4096', // allocate 4GB memory to Chrome
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--max_old_space_size=4096',
     ],
   },
 });
 
-// === Retry with auto‑delete if lock error persists ===
+// === Override initialize to set auth strategy dynamically ===
 const originalInit = client.initialize.bind(client);
 client.initialize = async function() {
-  cleanLockFiles();
-  try {
-    await originalInit();
-  } catch (err) {
-    if (err.message && err.message.includes('profile appears to be in use')) {
-      console.log('🔁 Lock error – deleting session and retrying...');
-      deleteSessionFolder();
-      fs.mkdirSync(sessionPath, { recursive: true });
-      cleanLockFiles();
-      await originalInit(); // retry once
-    } else {
-      throw err;
-    }
+  // Determine auth strategy now
+  let authStrategy;
+  if (process.env.MONGODB_URI) {
+    await connectMongo();
+    const store = new MongoStore({ mongoose });
+    authStrategy = new RemoteAuth({
+      store,
+      clientId: 'electrolyte-bot',
+      backupSyncIntervalMs: 60000, // required
+    });
+    console.log('✅ Using RemoteAuth (MongoDB)');
+  } else {
+    const sessionPath = process.env.SESSION_DATA_PATH || path.join(__dirname, '../data/session');
+    fs.mkdirSync(sessionPath, { recursive: true });
+    authStrategy = new LocalAuth({ dataPath: sessionPath });
+    console.log(`⚠️ Using LocalAuth at ${sessionPath}`);
   }
+
+  // Set the auth strategy on the client
+  this.options.authStrategy = authStrategy;
+
+  // Now call the original initialize
+  await originalInit();
 };
 
 // === Event handlers ===
@@ -93,9 +87,9 @@ client.on('qr', async (qr) => {
     isReady = false;
     connectionState = 'qr';
     lastError = null;
-    console.log('QR generated and stored');
+    console.log('📱 QR generated and stored');
   } else {
-    console.log('QR regenerated, ignoring');
+    console.log('♻️ QR regenerated, ignoring');
   }
 });
 
@@ -105,75 +99,50 @@ client.on('ready', () => {
   qrGenerated = false;
   connectionState = 'ready';
   lastError = null;
-  console.log('WhatsApp client ready');
+  console.log('✅ WhatsApp client ready');
 });
 
-// ═══════════════════════════════════════════════════════════
-// 🔥 THE FIX: Set isReady = true on authenticated event
-// ═══════════════════════════════════════════════════════════
 client.on('authenticated', () => {
   connectionState = 'authenticated';
-  isReady = true;   // <-- THIS IS THE KEY FIX
+  isReady = true;
   lastError = null;
-  console.log('WhatsApp client authenticated (ready state set)');
+  console.log('✅ WhatsApp authenticated');
 });
 
 client.on('auth_failure', (message) => {
   connectionState = 'auth_failure';
   lastError = message || 'Authentication failed';
   isReady = false;
-  console.error('WhatsApp authentication failed:', message);
+  console.error('❌ Authentication failed:', message);
 });
 
 client.on('disconnected', (reason) => {
   isReady = false;
   connectionState = 'disconnected';
   lastError = reason || 'Disconnected';
-  console.log('WhatsApp disconnected');
+  console.log('🔌 WhatsApp disconnected');
 });
 
-// === Helper: Wait for client to be ready (now always returns true quickly) ===
-async function waitForReady(timeout = 30000) {
-  // isReady is now set on authenticated, so this will return immediately
-  if (isReady) return true;
-  // fallback: wait up to 5 seconds for authentication
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Client not ready within timeout')), timeout);
-    const check = setInterval(() => {
-      if (isReady) {
-        clearInterval(check);
-        clearTimeout(timer);
-        resolve(true);
-      }
-    }, 500);
-  });
-}
-
-// === sendTaskReminders with readiness check ===
+// === sendTaskReminders (text-only) ===
 async function sendTaskReminders(tasks, phone) {
+  const technicianName = tasks[0].technician_name;
+  const chatId = `91${phone}@c.us`;
+
+  const taskList = tasks.map(t =>
+    `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
+  ).join('\n');
+
+  const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
+
   try {
-    await waitForReady(30000);
-    const technicianName = tasks[0].technician_name;
-    // const imagePath = generateTasksCard(tasks, technicianName);
-    // const media = MessageMedia.fromFilePath(imagePath);
-    const chatId = `91${phone}@c.us`;
-
-    const taskList = tasks.map(t =>
-      `Case #${t.case_number || 'N/A'} (${t.city || 'Unknown'}) - ${t.days_pending || 0} days`
-    ).join('\n');
-
-    const caption = `Hi ${technicianName}, you have ${tasks.length} pending task(s):\n${taskList}\n\nPlease update your status today. — Electrolyte Solutions`;
-
     await Promise.race([
-      // client.sendMessage(chatId, media, { caption }),
-      client.sendMessage(chatId,  { caption }),
+      client.sendMessage(chatId, caption),
       new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), 60000))
     ]);
-
     console.log(`✅ Sent ${tasks.length} tasks to ${technicianName} (${phone})`);
-    await new Promise((res) => setTimeout(res, 4000));
+    await new Promise(res => setTimeout(res, 4000));
   } catch (err) {
-    console.error(`❌ Failed to send to ${tasks[0]?.technician_name || 'unknown'}:`, err.message);
+    console.error(`❌ Failed to send to ${technicianName}:`, err.message);
     throw err;
   }
 }
@@ -184,14 +153,20 @@ function getStatus() { return isReady; }
 function getConnectionState() { return connectionState; }
 function getLastError() { return lastError; }
 function resetSession() {
-  deleteSessionFolder();
-  fs.mkdirSync(sessionPath, { recursive: true });
   qrCodeBase64 = null;
   isReady = false;
   qrGenerated = false;
   connectionState = 'initializing';
   lastError = null;
-  console.log('🔁 Session reset. Please scan QR again.');
+  console.log('🔁 Session reset');
 }
 
-module.exports = { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError, resetSession };
+module.exports = {
+  client,
+  sendTaskReminders,
+  getQRCode,
+  getStatus,
+  getConnectionState,
+  getLastError,
+  resetSession,
+};

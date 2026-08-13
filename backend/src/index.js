@@ -5,7 +5,7 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError } = require('./whatsapp');
+const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError ,connectMongo} = require('./whatsapp');
 const { parseAndUpsertCSV } = require('./csvParser');
 const { startScheduler } = require('./scheduler');
 const db = require('./db');
@@ -73,6 +73,7 @@ const upload = multer({
   },
 });
 
+// const { connectMongo } = require('./whatsapp');
 try {
   client.initialize();
   console.log("Whatsapp connected ");
@@ -114,7 +115,7 @@ app.get('/api/qr', (req, res) => {
   const state = getConnectionState();
   res.json({
     qr: getQRCode(),
-    connected: ready || state === 'authenticated',  // fallback
+    connected: state ="ready" || state === 'authenticated',  // fallback
     state: state,
     error: getLastError(),
   });

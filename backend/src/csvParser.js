@@ -65,9 +65,10 @@ function parseAndUpsertCSV(filePath) {
       .pipe(csv())
       .on('data', (row) => {
         rowCount++;
-        if (rowCount % 100 === 0) {
-          console.log(`📄 Processing CSV row ${rowCount}...`);
-        }
+const LOG_INTERVAL = process.env.NODE_ENV === 'production' ? 500 : 100;
+if (rowCount % LOG_INTERVAL === 0) {
+  console.log(`📄 Processing CSV row ${rowCount}...`);
+}
 
         let lineItemStatus = row['LineItem Status']?.trim();
         // Normalise status: treat any case of 'new' as 'New'
