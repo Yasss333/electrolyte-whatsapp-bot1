@@ -36,15 +36,14 @@ RUN npm install
 COPY . .
 
 # Create runtime folders
-RUN mkdir -p db session generated-images
+RUN mkdir -p db session generated-images data/session
 
+# Set environment variables
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
 EXPOSE 5000
-# Insidwe Dockerfile – remove lock files before starting the app
-RUN echo "rm -rf /app/data/session/Singleton* || true" > /usr/local/bin/clean-locks.sh && chmod +x /usr/local/bin/clean-locks.sh
 
-CMD ["sh", "-c", "/usr/local/bin/clean-locks.sh && node src/index.js"]
-
-CMD ["npm", "start"]
+# Clean lock files and start app (single CMD)
+CMD ["sh", "-c", "rm -rf /app/data/session/Singleton* 2>/dev/null || true && node src/index.js"]
