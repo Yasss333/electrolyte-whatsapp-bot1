@@ -466,14 +466,14 @@ app.delete('/api/technicians/:id', (req, res) => {
 
 app.post('/api/send', async (req, res) => {
   try {
-    const state = getConnectionState();
-    const connected = getStatus() || state === 'authenticated';
-    if (!connected) {
-      return res.status(503).json({ 
-        success: false, 
-        error: 'WhatsApp client is not ready. Please ensure QR is scanned and connection is established.' 
-      });
-    }
+    // const state = getConnectionState();
+    // const connected = getStatus() || state === 'authenticated';
+    // if (!connected) {
+    //   return res.status(503).json({ 
+    //     success: false, 
+    //     error: 'WhatsApp client is not ready. Please ensure QR is scanned and connection is established.' 
+    //   });
+    // }
 
     const pendingTasks = db.prepare(`
       SELECT * FROM tasks 
