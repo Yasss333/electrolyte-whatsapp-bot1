@@ -116,7 +116,7 @@ app.get('/api/qr', (req, res) => {
   const state = getConnectionState();
   res.json({
     qr: getQRCode(),
-    connected: state ="ready" || state === 'authenticated',  // fallback
+    connected:ready ||  state ==="ready" || state === 'authenticated',  // fallback
     state: state,
     error: getLastError(),
   });
