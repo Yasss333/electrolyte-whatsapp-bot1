@@ -1,17 +1,28 @@
-.env
-./node_modules
+# === Node ===
 node_modules/
-
-.wwebjs_cache/
-session/
-
-# Generated files
-generated-images/
-
-# Database
-*.db
-!backend/db/electrolyte.db
-
-# Logs
-logs/
+.env
 *.log
+
+# === WhatsApp Session ===
+session/
+.wwebjs_cache/
+data/session/
+data/session/**/*
+
+# === Database ===
+*.db
+*.db-journal
+
+# === Generated Files ===
+generated-images/
+*.png
+*.jpg
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === IDE ===
+.vscode/
+.idea/
