@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
-const baseUrl= (import.meta.env.VITE_API_URL   || "http://127.0.0.1:5000").replace(/\/$/, "");
-const API=baseUrl +"api";
+const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+const baseUrl = _envUrl.replace(/\/$/, '').replace(/\/api$/i, '');
+const API = baseUrl + "/api";
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [reports, setReports] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [monthlyStats, setMonthlyStats] = useState(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
   const { refreshTrigger, triggerRefresh } = useAppContext();
 
   const fetchStats = async () => {
@@ -37,12 +40,27 @@ export default function Dashboard() {
     }
   };
 
+  const fetchMonthlyStats = async () => {
+    setMonthlyLoading(true);
+    try {
+      const r = await axios.get(`${API}/stats/monthly`);
+      setMonthlyStats(r.data);
+    } catch (err) {
+      console.error("Monthly stats fetch error", err);
+    } finally {
+      setMonthlyLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchStats();
-    fetchReports();
-    fetchLeaderboard();
+    const initialFetch = setTimeout(() => {
+      fetchStats();
+      fetchReports();
+      fetchLeaderboard();
+      fetchMonthlyStats();
+    }, 0);
     const interval = setInterval(() => { fetchStats(); fetchLeaderboard(); fetchReports(); }, 10000);
-    return () => clearInterval(interval);
+    return () => { clearTimeout(initialFetch); clearInterval(interval); };
   }, [refreshTrigger]);
 
   const resetDashboard = async () => {
@@ -62,7 +80,13 @@ export default function Dashboard() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-orange-500">Dashboard</h1>
-        <div>
+        <div className="flex gap-2">
+          <button onClick={fetchStats} className="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-sm font-medium">
+            Refresh daily
+          </button>
+          <button onClick={fetchMonthlyStats} disabled={monthlyLoading} className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-2 rounded-lg text-sm font-medium">
+            Refresh month
+          </button>
           <button
             onClick={resetDashboard}
             className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg text-sm font-medium"
@@ -77,6 +101,7 @@ export default function Dashboard() {
         {[
           { label: "Messages Sent Today", value: stats.sentToday || 0, color: "text-blue-400" },
           { label: "Messages Sent (Last 30 days)", value: stats.sentLast30 || 0, color: "text-purple-400" },
+          { label: `Messages Sent (${monthlyStats?.month || stats.month || "this month"})`, value: monthlyStats?.count ?? stats.sentMonth ?? 0, color: "text-green-400" },
         ].map((s) => (
           <div key={s.label} className="bg-slate-800 rounded-xl p-5 border border-slate-700">
             <p className="text-slate-400 text-xs">{s.label}</p>

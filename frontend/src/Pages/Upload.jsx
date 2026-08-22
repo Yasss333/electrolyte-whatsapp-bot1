@@ -2,13 +2,17 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
 
-const baseURL = import.meta.env.VITE_API_URL +"api" || "http://127.0.0.1:5000";
-const API = baseURL +"api" ;
+const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+const baseURL = _envUrl.replace(/\/$/, '').replace(/\/api$/i, '');
+const API = baseURL + "/api";
 export default function Upload() {
   const { tasks, setTasks, technicians, setTechnicians, triggerRefresh } = useAppContext();
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState("");
   const [sending, setSending] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [parsedCount, setParsedCount] = useState(0);
+  const [parsedTarget, setParsedTarget] = useState(0);
   const [dragOver, setDragOver] = useState(false);
 
   // Fetch technicians once on mount
@@ -22,7 +26,39 @@ export default function Upload() {
       }
     };
     fetchTechs();
-  }, []); // only once
+    axios.get(`${API}/send-jobs/active`).then(({ data }) => {
+      if (data && (data.status === "queued" || data.status === "running")) {
+        setSending(true);
+      }
+    }).catch(() => {});
+  }, [setTechnicians]);
+
+  useEffect(() => {
+    if (parsedCount >= parsedTarget) return undefined;
+    const interval = window.setInterval(() => {
+      setParsedCount((count) => Math.min(count + Math.max(1, Math.ceil((parsedTarget - count) / 8)), parsedTarget));
+    }, 80);
+    return () => window.clearInterval(interval);
+  }, [parsedCount, parsedTarget]);
+
+  const waitForSendJob = async (jobId) => {
+    const { data } = await axios.get(`${API}/send-jobs/active`);
+    if (!data || data.id !== jobId || data.status === "queued" || data.status === "running") {
+      window.setTimeout(() => waitForSendJob(jobId).catch(() => setSending(false)), 3000);
+      return;
+    }
+    setSending(false);
+    if (data.status === "failed") {
+      setStatus(`❌ Bulk send failed: ${data.error}`);
+      return;
+    }
+    const skippedNames = data.skippedTechnicians?.slice(0, 5) || [];
+    const missingText = skippedNames.length
+      ? ` Add contacts for: ${skippedNames.join(", ")}${data.skippedTechnicians.length > 5 ? " and others" : ""}.`
+      : "";
+    setStatus(`✅ Sent ${data.sent} reminder(s). ${data.skipped || 0} skipped.${missingText}`);
+    triggerRefresh();
+  };
 
   const handleUpload = async () => {
     if (!file) {
@@ -31,6 +67,9 @@ export default function Upload() {
     }
 
     setStatus("Uploading and parsing CSV...");
+    setParsing(true);
+    setParsedCount(0);
+    setParsedTarget(0);
     const form = new FormData();
     form.append("csv", file);
 
@@ -40,9 +79,12 @@ export default function Upload() {
       });
       const taskRes = await axios.get(`${API}/tasks`);
       setTasks(taskRes.data || []);
+      setParsedTarget(uploadRes.data.pendingCount ?? taskRes.data.length);
+      setParsing(false);
       setStatus(`✅ ${uploadRes.data.pendingCount ?? taskRes.data.length} pending task(s) loaded`);
       triggerRefresh();
     } catch (err) {
+      setParsing(false);
       const message = err.response?.data?.error || err.message || "Upload failed";
       setStatus(`❌ ${message}`);
     }
@@ -61,21 +103,12 @@ export default function Upload() {
     setSending(true);
     try {
       const res = await axios.post(`${API}/send`);
-      const { sent, skipped, details } = res.data;
-      let msg = `✅ Sent ${sent} reminder(s).`;
-      if (skipped > 0) {
-        msg += ` ⚠️ ${skipped} task(s) skipped.`;
-        if (details && details.length) {
-          const reasons = details.map(d => `Case ${d.caseNumber}: ${d.reason}`).join('; ');
-          msg += ` (${reasons}${skipped > details.length ? ` and ${skipped - details.length} more...` : ''})`;
-        }
-      }
-      setStatus(msg);
-      triggerRefresh(); // refresh dashboard after sending
+      setStatus("Bulk send started. You can refresh this page safely; progress is saved.");
+      waitForSendJob(res.data.jobId);
     } catch (err) {
-      setStatus("❌ Error sending reminders: " + err.message);
+      setStatus("❌ Error starting reminders: " + (err.response?.data?.error || err.message));
+      setSending(false);
     }
-    setSending(false);
   };
 
   const clearTasks = async () => {
@@ -140,6 +173,18 @@ const exportTasks = async () => {
 return (
     <div className="max-w-5xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold text-orange-500">Upload & Send</h1>
+
+      {(parsing || parsedCount < parsedTarget) && (
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-4" aria-live="polite">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="text-slate-300">Parsing tasks</span>
+            <span className="text-orange-400 tabular-nums">{parsedCount} loaded</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+            <div className={`h-full bg-orange-500 transition-all duration-150 ${parsing && parsedTarget === 0 ? "w-1/3 animate-pulse" : ""}`} style={parsedTarget ? { width: `${Math.round((parsedCount / parsedTarget) * 100)}%` } : undefined} />
+          </div>
+        </div>
+      )}
 
       {/* Drop Zone */}
       <div

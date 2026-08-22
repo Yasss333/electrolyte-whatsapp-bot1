@@ -20,7 +20,7 @@ console.log("Database path:", dbPath);
 
 db.prepare(`CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  case_number TEXT,
+  case_number TEXT UNIQUE,
   technician_name TEXT,
   customer_name TEXT,
   city TEXT,
@@ -83,6 +83,17 @@ db.prepare(`CREATE TABLE IF NOT EXISTS send_reports (
   reason TEXT,
   suggestion TEXT,
   type TEXT
+)`).run();
+
+db.prepare(`CREATE TABLE IF NOT EXISTS send_jobs (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  total INTEGER DEFAULT 0,
+  sent INTEGER DEFAULT 0,
+  skipped INTEGER DEFAULT 0,
+  error TEXT,
+  started_at TEXT,
+  finished_at TEXT
 )`).run();
 
 module.exports = db;

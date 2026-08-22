@@ -24,10 +24,10 @@ export default function App() {
         ))}
       </nav>
       <main className="p-8">
-        {tab === "setup" && <Setup />}
-        {tab === "upload" && <Upload />}
-        {tab === "dashboard" && <Dashboard />}
-        {tab === "technicians" && <Technicians />}
+        <div className={tab === "setup" ? "" : "hidden"}><Setup /></div>
+        <div className={tab === "upload" ? "" : "hidden"}><Upload /></div>
+        <div className={tab === "dashboard" ? "" : "hidden"}><Dashboard /></div>
+        <div className={tab === "technicians" ? "" : "hidden"}><Technicians /></div>
       </main>
     </div>
   );

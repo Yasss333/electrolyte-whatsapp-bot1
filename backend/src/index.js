@@ -1,27 +1,24 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
-const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError ,connectMongo} = require('./whatsapp');
+const crypto = require('crypto');
+const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError, initializeClient, logoutClient, resetClientSession } = require('./whatsapp');
 const { parseAndUpsertCSV } = require('./csvParser');
 const { startScheduler } = require('./scheduler');
 const db = require('./db');
-// ═══════════════════════════════════════════════════
-//  DEPLOYMENT VERSION: v2.0.0 – LOCK FIX + CLIENTID REMOVED
-// ═══════════════════════════════════════════════════
+
+db.prepare("UPDATE send_jobs SET status = 'failed', error = 'Interrupted by backend restart', finished_at = ? WHERE status IN ('queued', 'running')").run(new Date().toISOString());
+
 console.log("Latest",Date.now());
 
 // Manually reset WhatsApp session – deletes session folder and restarts client
 const app = express();
 app.post('/api/reset-session', async (req, res) => {
   try {
-    const { resetSession } = require('./whatsapp');
-    resetSession();
-    // Reinitialize the client after reset
-    await client.initialize();
+    await resetClientSession();
     res.json({ success: true, message: 'Session reset. Please scan QR again.' });
   } catch (err) {
     console.error('Reset error:', err.message);
@@ -31,35 +28,20 @@ app.post('/api/reset-session', async (req, res) => {
 
 app.post('/api/logout', async (req, res) => {
   try {
-    const { resetSession, client } = require('./whatsapp');
-    if (client && client.destroy) {
-      await client.destroy();
-    }
-    resetSession();
-    res.json({ success: true, message: 'Logged out successfully' });
+    await logoutClient();
+    res.json({ success: true, message: 'Logged out successfully. Scan the new QR code.' });
   } catch (err) {
     console.error('Logout error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
-const allowedOrigins = [
-  
-   "https://electrolyte-whatsapp-bot1-czac.vercel.app",
-   "https://electrolyte-whatsapp-bot1-czac-niio7xfhq.vercel.app"
-  ,process.env.FRONTEND_URL,
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-].filter(Boolean);
+// const allowedOrigins = [
+//   'http://localhost:5173',
+//   'http://127.0.0.1:5173'
+// ];
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-      return;
-    }
-    callback(null, false);
-  },
-  credentials: true,
+  origin: '*'
 }));
 app.use(express.json());
 
@@ -76,7 +58,7 @@ const upload = multer({
 
 // const { connectMongo } = require('./whatsapp');
 try {
-  client.initialize();
+  initializeClient().catch((err) => console.error('WhatsApp client initialization failed:', err.message));
   console.log("Whatsapp connected ");
   
 } catch (err) {
@@ -128,13 +110,13 @@ app.get('/api/qr', (req, res) => {
 
 process.on('SIGTERM', async () => {
   console.log('Received SIGTERM, cleaning up...');
-  await client.destroy();
+  await client.destroy().catch(() => {});
   process.exit(0);
 });
 
 process.on('SIGINT', async () => {
   console.log('Received SIGINT, cleaning up...');
-  await client.destroy();
+  await client.destroy().catch(() => {});
   process.exit(0);
 });
 
@@ -344,7 +326,7 @@ app.post('/api/upload-phones', upload.single('csv'), (req, res) => {
 app.get('/api/tasks', (req, res) => {
   const tasks = db.prepare(`
     SELECT * FROM tasks 
-    WHERE resolved_at IS NULL AND line_item_status = 'New'
+    WHERE line_item_status = 'New'
     ORDER BY days_pending DESC
   `).all();
   res.json(tasks);
@@ -464,7 +446,7 @@ app.delete('/api/technicians/:id', (req, res) => {
 //   });
 // });
 
-app.post('/api/send', async (req, res) => {
+async function processBulkSend(jobId) {
   try {
     // const state = getConnectionState();
     // const connected = getStatus() || state === 'authenticated';
@@ -477,8 +459,9 @@ app.post('/api/send', async (req, res) => {
 
     const pendingTasks = db.prepare(`
       SELECT * FROM tasks 
-      WHERE resolved_at IS NULL AND line_item_status = 'New'
+      WHERE line_item_status = 'New'
     `).all();
+    db.prepare('UPDATE send_jobs SET total = ?, status = ? WHERE id = ?').run(pendingTasks.length, 'running', jobId);
     const technicians = db.prepare('SELECT * FROM technicians').all();
 
     const groups = new Map();
@@ -498,17 +481,18 @@ app.post('/api/send', async (req, res) => {
       }
 
       const tech = match.technician;
-      const phoneDigits = (tech.phone || '').replace(/\D/g, '');
-      if (phoneDigits.length < 10) {
+      const phoneDigits = normalizePhone(tech.phone);
+      if (!phoneDigits) {
         skipped.push({
           technicianName: techName,
           matchedTo: tech.name,
+          phone: tech.phone,
           reason: 'invalid phone (must be 10 digits)',
           case_number: task.case_number
         });
         continue;
       }
-      if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
+      if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, phone: phoneDigits, tasks: [] });
       groups.get(tech.id).tasks.push(task);
     }
 
@@ -518,14 +502,23 @@ app.post('/api/send', async (req, res) => {
 
     for (const [techId, techData] of groups) {
       try {
-        await Promise.race([
+        const sentTaskCount = await Promise.race([
           sendTaskReminders(techData.tasks, techData.phone),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), techTimeout))
         ]);
-        sent++;
+        sent += sentTaskCount;
+        console.log(`[BULK_SEND_SUCCESS] technician="${techData.name}" phone="${techData.phone}" cases=${techData.tasks.map((task) => task.case_number).join(',')}`);
+        const insertSuccessReport = db.prepare(`
+          INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const task of techData.tasks) {
+          insertSuccessReport.run(new Date().toISOString(), task.technician_name || null, techData.name, techData.phone, task.case_number || null, 'message sent', null, 'success');
+        }
+        db.prepare('UPDATE send_jobs SET sent = ? WHERE id = ?').run(sent, jobId);
       } catch (err) {
-        sendErrors.push({ technician: techData.name, reason: err.message });
-        console.error(`Send error for ${techData.name}:`, err.message);
+        sendErrors.push({ technician: techData.name, phone: techData.phone, cases: techData.tasks.map((task) => task.case_number), reason: err.message });
+        console.error(`[BULK_SEND_FAILURE] technician="${techData.name}" phone="${techData.phone}" cases=${techData.tasks.map((task) => task.case_number).join(',')} reason="${err.message}"`);
       }
     }
 
@@ -535,22 +528,49 @@ app.post('/api/send', async (req, res) => {
     `);
     const now = new Date().toISOString();
     for (const s of skipped) {
-      insertReport.run(now, s.technicianName || null, s.matchedTo || null, null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
+      console.error(`[BULK_SEND_SKIPPED] technician="${s.technicianName}" phone="${s.phone || ''}" case="${s.case_number || ''}" reason="${s.reason}"`);
+      insertReport.run(now, s.technicianName || null, s.matchedTo || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
     }
     for (const e of sendErrors) {
-      insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
+      for (const caseNumber of e.cases || [null]) {
+        insertReport.run(now, e.technician || null, e.technician || null, e.phone || null, caseNumber, e.reason || null, null, 'error');
+      }
     }
 
-    res.json({
+    const skippedCount = skipped.length + sendErrors.length;
+    db.prepare('UPDATE send_jobs SET status = ?, skipped = ?, finished_at = ? WHERE id = ?').run('completed', skippedCount, new Date().toISOString(), jobId);
+    return {
       success: true,
       sent,
-      skipped: skipped.length + sendErrors.length,
+      skipped: skippedCount,
       details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
-    });
+    };
   } catch (err) {
     console.error('Bulk send error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    db.prepare('UPDATE send_jobs SET status = ?, error = ?, finished_at = ? WHERE id = ?').run('failed', err.message, new Date().toISOString(), jobId);
+    return { success: false, error: err.message };
   }
+}
+
+app.post('/api/send', (req, res) => {
+  const active = db.prepare("SELECT * FROM send_jobs WHERE status IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1").get();
+  if (active) return res.status(409).json({ success: false, error: 'A bulk send is already running', jobId: active.id });
+  const jobId = crypto.randomUUID();
+  db.prepare('INSERT INTO send_jobs (id, status, started_at) VALUES (?, ?, ?)').run(jobId, 'queued', new Date().toISOString());
+  processBulkSend(jobId);
+  res.status(202).json({ success: true, jobId });
+});
+
+app.get('/api/send-jobs/active', (req, res) => {
+  const job = db.prepare('SELECT * FROM send_jobs ORDER BY started_at DESC LIMIT 1').get();
+  if (!job) return res.json(null);
+  const skippedTechnicians = db.prepare(`
+    SELECT DISTINCT COALESCE(technician_name, matched_name, 'Unknown') AS name
+    FROM send_reports
+    WHERE type = 'skipped' AND created_at >= ?
+    ORDER BY name
+  `).all(job.started_at).map((row) => row.name);
+  res.json({ ...job, skippedTechnicians });
 });
 
 // Return recent send reports (skipped/errors) for frontend dashboard
@@ -654,6 +674,14 @@ function findBestMatchDetailed(name, technicians) {
   return { technician: null, reason: 'no good match', suggestion: best?.name || null };
 }
 
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (digits.length === 10) return digits;
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  return null;
+}
+
 // Dashboard stats (unchanged, but now pending only from current data)
 app.get('/api/stats', (req, res) => {
   // Only return messages sent today and messages sent in last 30 days per request
@@ -665,8 +693,18 @@ app.get('/api/stats', (req, res) => {
       SELECT COUNT(*) as count FROM messages WHERE sent_at >= datetime(?, '-30 days')
       `).get(new Date().toISOString()).count;
       
-      res.json({ sentToday, sentLast30 });
+      const monthStart = new Date();
+      monthStart.setUTCDate(1);
+      monthStart.setUTCHours(0, 0, 0, 0);
+      const sentMonth = db.prepare('SELECT COUNT(*) as count FROM messages WHERE sent_at >= ?').get(monthStart.toISOString()).count;
+      res.json({ sentToday, sentLast30, sentMonth, month: monthStart.toISOString().slice(0, 7) });
     });
+
+app.get('/api/stats/monthly', (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month : new Date().toISOString().slice(0, 7);
+  const count = db.prepare("SELECT COUNT(*) as count FROM messages WHERE strftime('%Y-%m', sent_at) = ? AND status = 'sent'").get(month).count;
+  res.json({ month, count });
+});
     
     
     // Technician leaderboard: pending task counts per technician
@@ -688,9 +726,10 @@ app.get('/api/stats', (req, res) => {
 app.get("/", (req, res) => {
   res.status(200).json({
     success: true,
-    message: "Backend running :Nilesh dont forget you are a KAMAL",
+    message: "Backend running ",
   });
 });
-app.listen(process.env.PORT || 5000, () => {
-  console.log(`Backend running on port ${process.env.PORT || 5000}`);
+
+app.listen(5000, () => {
+  console.log('Backend running on port 5000');
 });

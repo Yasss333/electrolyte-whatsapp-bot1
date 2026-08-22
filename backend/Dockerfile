@@ -39,7 +39,6 @@ COPY . .
 RUN mkdir -p db session generated-images data/session
 
 # Set environment variables
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 

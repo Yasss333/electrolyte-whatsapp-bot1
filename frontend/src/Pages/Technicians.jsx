@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
 
-const baseURL = import.meta.env.VITE_API_URL +"api" || "http://127.0.0.1:5000";
-const API = baseURL +"api";
+const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
+const baseURL = _envUrl.replace(/\/$/, '').replace(/\/api$/i, '');
+const API = baseURL + "/api";
 
 export default function Technicians() {
   const [technicians, setTechnicians] = useState([]);

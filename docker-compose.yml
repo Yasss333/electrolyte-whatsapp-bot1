@@ -1,0 +1,21 @@
+# version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - ./generated-images:/app/generated-images
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      MAX_TASKS_PER_CARD: ${MAX_TASKS_PER_CARD:-25}
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+    working_dir: /app

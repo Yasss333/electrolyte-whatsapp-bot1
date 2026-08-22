@@ -12,6 +12,7 @@ data/session/**/*
 # === Database ===
 *.db
 *.db-journal
+backend/db/*.db
 
 # === Generated Files ===
 generated-images/

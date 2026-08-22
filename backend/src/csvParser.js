@@ -32,13 +32,6 @@ function normalizeTechnicianName(rawName) {
   return trimmed;
 }
 
-// function classifyReply(text) {
-//   const t = text.toLowerCase();
-//   if (['done', 'completed', 'finish', 'fixed', 'resolved'].some(w => t.includes(w))) return 'completed';
-//   if (['part', 'waiting', 'delay', 'pending', 'stuck'].some(w => t.includes(w))) return 'delayed';
-//   return 'unclassified';
-// }
-
 function parseAndUpsertCSV(filePath) {
   return new Promise((resolve, reject) => {
     const results = [];
@@ -53,6 +46,23 @@ function parseAndUpsertCSV(filePath) {
         technician_assigned_date, created_date, end_date,
         days_pending, resolved_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(case_number) DO UPDATE SET
+        technician_name = excluded.technician_name,
+        customer_name = excluded.customer_name,
+        city = excluded.city,
+        state = excluded.state,
+        zip = excluded.zip,
+        street = excluded.street,
+        complaint = excluded.complaint,
+        product_name = excluded.product_name,
+        wo_status = excluded.wo_status,
+        line_item_status = excluded.line_item_status,
+        technician_assigned_date = excluded.technician_assigned_date,
+        created_date = excluded.created_date,
+        end_date = excluded.end_date,
+        days_pending = excluded.days_pending,
+        resolved_at = excluded.resolved_at,
+        updated_at = excluded.updated_at
     `);
 
     const insertMany = db.transaction((rows) => {
@@ -65,10 +75,10 @@ function parseAndUpsertCSV(filePath) {
       .pipe(csv())
       .on('data', (row) => {
         rowCount++;
-const LOG_INTERVAL = process.env.NODE_ENV === 'production' ? 500 : 100;
-if (rowCount % LOG_INTERVAL === 0) {
-  console.log(`📄 Processing CSV row ${rowCount}...`);
-}
+        const LOG_INTERVAL = process.env.NODE_ENV === 'production' ? 500 : 100;
+        if (rowCount % LOG_INTERVAL === 0) {
+          console.log(`📄 Processing CSV row ${rowCount}...`);
+        }
 
         let lineItemStatus = row['LineItem Status']?.trim();
         // Normalise status: treat any case of 'new' as 'New'
@@ -83,8 +93,8 @@ if (rowCount % LOG_INTERVAL === 0) {
 
         if (!caseNumber) return;
 
-        const shouldMarkResolved = lineItemStatus !== 'New' && (lineItemStatus === 'Completed' || woStatus === 'Resolved');
-        const isCompleted = shouldMarkResolved;
+        // ✅ Only mark resolved if LineItem Status is 'Completed'
+        const isCompleted = lineItemStatus === 'Completed';
         const daysPending = daysBetween(row['Created Date']?.trim());
 
         batch.push([
@@ -103,7 +113,8 @@ if (rowCount % LOG_INTERVAL === 0) {
           row['Created Date']?.trim(),
           row['End Date']?.trim(),
           daysPending,
-          shouldMarkResolved ? new Date().toISOString() : null,
+          // ✅ Use isCompleted instead of undefined shouldMarkResolved
+          isCompleted ? new Date().toISOString() : null,
           new Date().toISOString()
         ]);
 
@@ -112,7 +123,7 @@ if (rowCount % LOG_INTERVAL === 0) {
           batch = [];
         }
 
-        // Collect pending tasks only if status is "New"
+        // Collect pending tasks only if status is "New" and not completed
         if (!isCompleted && lineItemStatus === 'New') {
           results.push({
             caseNumber,
