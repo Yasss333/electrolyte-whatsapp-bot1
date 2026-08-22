@@ -6,8 +6,8 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./data:/app/data
-      - ./generated-images:/app/generated-images
+      - ./backend/data:/app/data
+      - ./backend/generated-images:/app/generated-images
     restart: unless-stopped
     working_dir: /app
     environment:
