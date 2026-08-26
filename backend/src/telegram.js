@@ -17,6 +17,7 @@ let initializationPromise = null;
 let pollInProgress = false;
 let updateOffset = 0;
 const activePolls = new Set();
+const pendingEquipmentRequests = new Set();
 
 function getToken() {
   return process.env.TELEGRAM_BOT_TOKEN?.trim();
@@ -110,9 +111,24 @@ async function initializeBotOnce() {
   }
 }
 
-async function sendMessage(chatId, text) {
+function mainMenu() {
+  return {
+    inline_keyboard: [
+      [{ text: '📋 Pending Tasks', callback_data: 'pending_tasks' }],
+      [{ text: '📦 Request Equipment', callback_data: 'request_equipment' }],
+      [{ text: '❓ Help', callback_data: 'help' }]
+    ]
+  };
+}
+
+async function sendMessage(chatId, text, replyMarkup = null) {
   const body = new URLSearchParams({ chat_id: String(chatId), text });
+  if (replyMarkup) body.set('reply_markup', JSON.stringify(replyMarkup));
   return telegramRequest('sendMessage', body);
+}
+
+async function answerCallbackQuery(callbackQueryId) {
+  return telegramRequest('answerCallbackQuery', new URLSearchParams({ callback_query_id: callbackQueryId }));
 }
 
 function findTechnician(chatId) {
@@ -144,22 +160,31 @@ async function handleCommand(message) {
     : /\b(task|tasks|work|case|cases|assignment|assignments)\b/i.test(text) ? '/tasks' : '';
   const technician = findTechnician(chatId);
 
+  if (!text.startsWith('/') && pendingEquipmentRequests.has(chatId)) {
+    if (!technician) return sendMessage(chatId, 'Your Telegram account is not registered. Please contact your administrator.');
+    pendingEquipmentRequests.delete(chatId);
+    db.prepare(`INSERT INTO item_requests (technician_name, item_description, status, requested_at)
+      VALUES (?, ?, 'pending', ?)`).run(technician.name, text, new Date().toISOString());
+    return sendMessage(chatId, '✅ Equipment request submitted. Admin will review it.', mainMenu());
+  }
+
   if (command === '/start') {
-    return sendMessage(chatId, technician
-      ? `Welcome back, ${technician.name}! Use /tasks to view your pending work.`
-      : 'Your Telegram account is not registered yet. Please contact your administrator so they can add your chat ID.');
+    if (!technician) {
+      return sendMessage(chatId, 'Your Telegram account is not registered yet. Please contact your administrator so they can add your chat ID.');
+    }
+    return sendMessage(chatId, `Hello ${technician.name}, welcome to Electrolyte Solutions! You will receive task updates and reminders from our team here.`, mainMenu());
   }
   if (command === '/help') {
-    return sendMessage(chatId, 'Available commands:\n/tasks – View your pending tasks\n/done CASE_ID – Mark a task as completed\n/item DESCRIPTION – Request a spare part or equipment\n/help – Show this message');
+    return sendMessage(chatId, 'Choose an option below, or use /tasks, /done CASE_ID, or /item DESCRIPTION.', mainMenu());
   }
   if (!technician) {
     return sendMessage(chatId, 'Your Telegram account is not registered. Please contact your administrator.');
   }
   if (command === '/tasks') {
     const tasks = findPendingTasks(technician.name);
-    if (!tasks.length) return sendMessage(chatId, '🎉 You have no pending tasks.');
+    if (!tasks.length) return sendMessage(chatId, '🎉 You have no pending tasks.', mainMenu());
     const list = tasks.map((task, index) => `${index + 1}. Case #${task.case_number} (${task.city || 'Unknown city'}) – ${task.days_pending || 0} days pending`).join('\n');
-    return sendMessage(chatId, `📋 Your Pending Tasks:\n${list}\n\nReply with /done CASE_ID to mark as completed.`);
+    return sendMessage(chatId, `📋 Your Pending Tasks:\n${list}\n\nReply with /done CASE_ID to mark as completed.`, mainMenu());
   }
   if (command === '/done') {
     const caseNumber = text.slice(command.length).trim();
@@ -177,24 +202,48 @@ async function handleCommand(message) {
   }
   if (command === '/item') {
     const description = text.slice(command.length).trim();
-    if (!description) return sendMessage(chatId, 'Usage: /item DESCRIPTION');
+    if (!description) {
+      pendingEquipmentRequests.add(chatId);
+      return sendMessage(chatId, '📦 Please type the equipment or spare part you need.', mainMenu());
+    }
     db.prepare(`INSERT INTO item_requests (technician_name, item_description, status, requested_at)
       VALUES (?, ?, 'pending', ?)`).run(technician.name, description, new Date().toISOString());
-    return sendMessage(chatId, '📦 Request submitted! Admin will review it.');
+    return sendMessage(chatId, '✅ Equipment request submitted. Admin will review it.', mainMenu());
   }
-  return sendMessage(chatId, 'I did not understand that command. Use /help to see available commands.');
+  return sendMessage(chatId, 'I did not understand that command. Choose an option below.', mainMenu());
+}
+
+async function handleCallbackQuery(callbackQuery) {
+  const chatId = String(callbackQuery.message?.chat?.id || '');
+  if (!chatId) return;
+  await answerCallbackQuery(callbackQuery.id);
+  const technician = findTechnician(chatId);
+  if (!technician) return sendMessage(chatId, 'Your Telegram account is not registered. Please contact your administrator.');
+
+  if (callbackQuery.data === 'pending_tasks') return handleCommand({ chat: { id: chatId }, text: '/tasks' });
+  if (callbackQuery.data === 'help') return handleCommand({ chat: { id: chatId }, text: '/help' });
+  if (callbackQuery.data === 'request_equipment') {
+    pendingEquipmentRequests.add(chatId);
+    return sendMessage(chatId, '📦 Please type the equipment or spare part you need.', mainMenu());
+  }
 }
 
 async function pollForCommands() {
   if (pollInProgress || pollingDisabled || !getToken() || connectionState !== 'ready') return;
   pollInProgress = true;
   try {
-    const updates = await telegramRequest('getUpdates', new URLSearchParams({ offset: String(updateOffset), timeout: '0', allowed_updates: JSON.stringify(['message']) }));
+    const updates = await telegramRequest('getUpdates', new URLSearchParams({ offset: String(updateOffset), timeout: '0', allowed_updates: JSON.stringify(['message', 'callback_query']) }));
     for (const update of updates) {
       updateOffset = update.update_id + 1;
+      if (update.callback_query) {
+        await handleCallbackQuery(update.callback_query).catch((error) => console.error('Telegram button error:', error.message));
+        continue;
+      }
       if (update.message?.text?.startsWith('/') || /\b(task|tasks|work|case|cases|assignment|assignments)\b/i.test(update.message?.text || '')) {
         console.log(`[TELEGRAM_CHAT_ID] ${update.message.from?.first_name || 'User'} ${update.message.from?.last_name || ''}`.trim(), String(update.message.chat.id));
         await handleCommand(update.message).catch((error) => console.error('Telegram command error:', error.message));
+      } else if (update.message?.text && pendingEquipmentRequests.has(String(update.message.chat.id))) {
+        await handleCommand(update.message).catch((error) => console.error('Telegram equipment request error:', error.message));
       }
     }
   } catch (error) {
