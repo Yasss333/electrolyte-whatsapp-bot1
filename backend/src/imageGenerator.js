@@ -5,7 +5,7 @@ const path = require('path');
 const configuredTasksPerCard = Number.parseInt(process.env.MAX_TASKS_PER_CARD || '15', 10);
 const MAX_TASKS_PER_CARD = Number.isFinite(configuredTasksPerCard) && configuredTasksPerCard > 0
   ? configuredTasksPerCard
-  : 55;
+  : 25;
 const IMAGE_RETENTION_DAYS = 7;
 
 function wrapText(ctx, value, maxWidth) {
@@ -24,7 +24,7 @@ function wrapText(ctx, value, maxWidth) {
   if (line) lines.push(line);
   return lines.length ? lines : ['-'];
 }
-
+//Manual clean up later can be done through a  nodecron when scale needed 
 function cleanupGeneratedImages(dir) {
   const cutoff = Date.now() - IMAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
   for (const file of fs.readdirSync(dir)) {

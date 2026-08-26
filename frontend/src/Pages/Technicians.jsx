@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import axios from "../api";
 
 const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
 const baseURL = _envUrl.replace(/\/$/, '').replace(/\/api$/i, '');
@@ -8,7 +8,7 @@ const API = baseURL + "/api";
 export default function Technicians() {
   const [technicians, setTechnicians] = useState([]);
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [chatId, setChatId] = useState("");
   const [msg, setMsg] = useState("");
   const [bulkFile, setBulkFile] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -21,10 +21,10 @@ export default function Technicians() {
   useEffect(() => { load(); }, []);
 
   const handleAdd = async () => {
-    if (!name || !phone) return;
-    await axios.post(`${API}/technicians`, { name, phone });
+    if (!name || !chatId) return;
+    await axios.post(`${API}/technicians`, { name, chat_id: chatId });
     setMsg(`✅ Saved ${name}`);
-    setName(""); setPhone("");
+    setName(""); setChatId("");
     load();
   };
 
@@ -32,9 +32,9 @@ export default function Technicians() {
     const tech = technicians.find(t => t.id === id);
     if (!tech) return;
     const newName = prompt("Update name:", tech.name);
-    const newPhone = prompt("Update phone:", tech.phone);
-    if (newName && newPhone) {
-      await axios.put(`${API}/technicians/${id}`, { name: newName, phone: newPhone });
+    const newChatId = prompt("Update Telegram chat ID:", tech.chat_id);
+    if (newName && newChatId) {
+      await axios.put(`${API}/technicians/${id}`, { name: newName, chat_id: newChatId });
       setMsg(`✅ Updated ${newName}`);
       load();
     }
@@ -51,7 +51,7 @@ export default function Technicians() {
     if (!bulkFile) return;
     const form = new FormData();
     form.append("csv", bulkFile);
-    const res = await axios.post(`${API}/upload-phones`, form);
+    const res = await axios.post(`${API}/upload-chat-ids`, form);
     setMsg(`✅ Imported ${res.data.imported} technicians`);
     setBulkFile(null);
     load();
@@ -59,12 +59,12 @@ export default function Technicians() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-orange-500">Technician Phone Numbers</h1>
+      <h1 className="text-2xl font-bold text-orange-500">Technician Telegram Chat IDs</h1>
 
       {/* Bulk Upload */}
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 space-y-3">
         <h2 className="text-sm font-semibold text-slate-300">Bulk Import via CSV</h2>
-        <p className="text-slate-500 text-xs">CSV format: <code className="text-orange-400">Name, Phone</code></p>
+        <p className="text-slate-500 text-xs">CSV format: <code className="text-orange-400">Name, Chat ID</code>. Each technician must first start a chat with your bot.</p>
         <div className="flex gap-3">
           <input
             type="file" accept=".csv"
@@ -86,8 +86,8 @@ export default function Technicians() {
           className="w-full bg-slate-700 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-orange-500"
         />
         <input
-          value={phone} onChange={(e) => setPhone(e.target.value)}
-          placeholder="Phone number (10 digits, no +91)"
+          value={chatId} onChange={(e) => setChatId(e.target.value)}
+          placeholder="Telegram chat ID (for example: 123456789)"
           className="w-full bg-slate-700 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 ring-orange-500"
         />
         <button onClick={handleAdd} className="bg-orange-500 hover:bg-orange-600 px-6 py-2 rounded-lg text-sm font-medium">
@@ -108,7 +108,7 @@ export default function Technicians() {
               <div key={t.id} className="flex justify-between items-center border-b border-slate-700 pb-3">
                 <div>
                   <p className="text-sm font-medium">{t.name}</p>
-                  <p className="text-slate-400 text-sm">{t.phone}</p>
+                  <p className="text-slate-400 text-sm">Chat ID: {t.chat_id || 'Not set'}</p>
                 </div>
                 <div className="flex gap-2">
                   {/* <button onClick={() => handleUpdate(t.id)} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs">

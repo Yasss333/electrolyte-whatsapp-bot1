@@ -75,7 +75,8 @@ function parseAndUpsertCSV(filePath) {
       .pipe(csv())
       .on('data', (row) => {
         rowCount++;
-        const LOG_INTERVAL = process.env.NODE_ENV === 'production' ? 500 : 100;
+        // const LOG_INTERVAL = process.env.NODE_ENV === 'production' ? 500 : 100;
+        const LOG_INTERVAL=500;
         if (rowCount % LOG_INTERVAL === 0) {
           console.log(`📄 Processing CSV row ${rowCount}...`);
         }

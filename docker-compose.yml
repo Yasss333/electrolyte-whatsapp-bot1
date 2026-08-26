@@ -12,6 +12,8 @@ services:
     working_dir: /app
     environment:
       MAX_TASKS_PER_CARD: ${MAX_TASKS_PER_CARD:-25}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      JWT_SECRET: ${JWT_SECRET}
 
   frontend:
     build: ./frontend

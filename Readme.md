@@ -1,155 +1,33 @@
-# Electrolyte Bot — WhatsApp Task Reminder
+# Electrolyte Bot — Telegram Task Reminder
 
-A full-stack automation system that sends WhatsApp reminders to technicians for their pending tasks. The admin uploads a CSV, and the bot sends a branded summary image to each technician via WhatsApp.
+Electrolyte Bot imports task CSV files, groups pending tasks by technician, creates branded task-card images, and sends them through the Telegram Bot API. The dashboard, SQLite storage, technician matching, and Excel export workflows are unchanged.
 
----
+## Setup
 
-## Tech Stack
+1. Create a bot with Telegram's `@BotFather` and copy its API token.
+2. Set `TELEGRAM_BOT_TOKEN` in `backend/.env` (or your cloud host's environment settings).
+3. Start the backend and open the Setup tab to verify that the bot is connected.
+4. Each technician must open the bot and press **Start** before it can send them a message.
+5. In **Technicians**, save each technician's numeric Telegram chat ID. Bulk CSV format is `Name, Chat ID`.
+6. Upload the task CSV and choose **Bulk Send**.
 
-| Layer | Tech |
-|---|---|
-| Frontend | React + Tailwind (Vite) |
-| Backend | Node.js + Express + SQLite |
-| WhatsApp | `whatsapp-web.js` + Puppeteer |
-| Deployment | Docker (local only) |
+## Environment variables
 
----
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Yes | API token supplied by BotFather |
+| `PORT` | No | Backend HTTP port; defaults to 5000 |
+| `MAX_TASKS_PER_CARD` | No | Number of tasks per generated image card; defaults to 25 |
+| `VITE_API_URL` | Frontend only | Public backend URL, when not running locally |
 
-## Architecture
+Telegram bots cannot initiate a direct conversation with a user: each technician must start the bot once. Use a chat-ID helper bot or your bot's update logs to obtain their numeric chat ID.
 
-```
-Admin Browser ──▶ React App (Vite) ──▶ Node Backend (Express)
-                                               │
-                                        SQLite DB (tasks.db)
-                                               │
-                                        WhatsApp Web (Puppeteer)
-```
+## Docker
 
----
-
-## Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) (free)
-- Git (optional)
-
----
-
-## Setup & Running
-
-### First-time setup
+Set `TELEGRAM_BOT_TOKEN` in the environment used by Docker Compose, then run:
 
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd electrolyte-bot
-
-# Start the app
-docker-compose up -d
+docker compose up --build
 ```
 
-Or double-click:
-- **Windows** → `start.bat`
-- **Mac/Linux** → `./start.sh`
-
-Wait **2–5 minutes** for Docker to build images on the first run.
-
-### Scan WhatsApp QR
-
-1. Open `http://localhost:5173`
-2. Go to **Setup** → scan the QR code
-3. On your phone: **WhatsApp → Settings → Linked Devices → Link a Device**
-
-### Subsequent starts
-
-```bash
-docker-compose up -d
-# Wait 30–60 seconds, then open http://localhost:5173
-```
-
-### Stop the app
-
-```bash
-docker-compose down
-```
-
----
-
-## Using the App
-
-1. **Add Technicians** — Go to the Technicians tab → add name + 10-digit phone number.
-2. **Upload Tasks** — Go to Upload & Send → drag & drop your CSV → click **Load Tasks**.
-3. **Send Reminders** — Click **Bulk Send**. Each technician gets a WhatsApp image + text summary.
-4. **Dashboard** — View stats, daily volume, and per-technician breakdown.
-
----
-
-## Folder Structure
-
-```
-electrolyte-bot/
-├── backend/
-│   ├── Dockerfile
-│   └── src/
-│       ├── index.js
-│       ├── whatsapp.js
-│       ├── csvParser.js
-│       ├── imageGenerator.js
-│       └── db.js
-├── frontend/
-│   ├── Dockerfile
-│   └── src/
-├── docker-compose.yml
-├── start.bat
-├── start.sh
-└── README.md
-```
-
----
-
-## Updating the App
-
-```bash
-docker-compose down
-docker-compose up -d --build
-```
-
-## Reset Everything
-
-```bash
-docker-compose down
-rm -rf data/session/
-docker-compose up -d
-# Re-scan the QR code after restart
-```
-
----
-
-## Troubleshooting
-
-| Issue | Fix |
-|---|---|
-| QR code not showing | `docker-compose logs backend` |
-| Messages timing out | Delete `data/session/` and re-scan QR |
-| Second upload skips tasks | Fixed — only `LineItem Status = 'Completed'` marks tasks resolved (not `WO Status`) |
-| Chromium not found | Ensure `PUPPETEER_EXECUTABLE_PATH` is set in the Dockerfile |
-
----
-
-## ⚠️ Cloud Deployment Warning
-
-**Do not deploy on free cloud tiers (Render, Railway, etc.).**
-
-Puppeteer requires ≥2 GB RAM and a persistent disk. Free tiers will crash with timeouts and disconnected sessions.
-
-- ✅ Runs perfectly locally with Docker
-- ❌ Cloud only viable on **paid tiers** with sufficient resources
-
----
-
-## Disclaimer
-
-This project uses `whatsapp-web.js`, which automates WhatsApp Web and is **not** an official WhatsApp API. Use responsibly. The developers are not liable for account bans or misuse.
-
----
-
-*Built for internship — Electrolyte Solutions*
+The backend uses the HTTPS Telegram Bot API directly; it does not require a browser, QR link, persistent messaging session, or Chromium.

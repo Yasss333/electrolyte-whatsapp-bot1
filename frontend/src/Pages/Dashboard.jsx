@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
+import axios from "../api";
 import { useAppContext } from "../context/AppContext";
 
 const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";

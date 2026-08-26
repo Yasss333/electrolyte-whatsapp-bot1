@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import axios from "../api";
 import { useAppContext } from "../context/AppContext";
 
 const _envUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:5000";
@@ -95,9 +95,10 @@ export default function Upload() {
       setStatus("⚠️ No tasks to send. Load a CSV first.");
       return;
     }
-    const hasPhone = technicians.some(t => t.phone && t.phone.trim() !== "");
-    if (!hasPhone) {
-      setStatus("❌ No technician has a phone number. Add phone numbers in Technicians tab.");
+    const hasChatId = technicians.some(t => t.chat_id && t.chat_id.trim() !== "");
+    if (!hasChatId) {
+      setStatus("❌ No technician has a Telegram chat ID. Add chat IDs in the Technicians tab.");
+      return;
       return;
     }
     setSending(true);
@@ -119,7 +120,7 @@ export default function Upload() {
     triggerRefresh();
   };
 
-  const hasPhone = technicians.some(t => t.phone && t.phone.trim() !== "");
+  const hasChatId = technicians.some(t => t.chat_id && t.chat_id.trim() !== "");
 // const exportTasks = async () => {
 //   try {
 //     const response = await axios.get(`${API}/export-tasks`, {
@@ -227,7 +228,7 @@ return (
   </button>
   <button
     onClick={handleBulkSend}
-    disabled={sending || tasks.length === 0 || !hasPhone}
+    disabled={sending || tasks.length === 0 || !hasChatId}
     className={`bg-orange-500 hover:bg-orange-600 disabled:opacity-50 px-6 py-2 rounded-lg font-medium`}
   >
     {sending ? "Sending..." : ` Bulk Send (${tasks.length})`}
@@ -249,8 +250,8 @@ return (
 
       {status && <p className={`text-sm ${status.includes("❌") ? "text-red-400" : "text-green-400"}`}>{status}</p>}
 
-      {tasks.length > 0 && !hasPhone && (
-        <p className="text-yellow-400 text-sm">⚠️ No technician has a phone number. Add phones in Technicians tab to send reminders.</p>
+      {tasks.length > 0 && !hasChatId && (
+        <p className="text-yellow-400 text-sm">⚠️ No technician has a Telegram chat ID. Add chat IDs in the Technicians tab to send reminders.</p>
       )}
 
       {/* Tasks Table */}

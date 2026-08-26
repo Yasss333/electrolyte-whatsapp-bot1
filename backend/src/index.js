@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -5,36 +6,17 @@ const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { client, sendTaskReminders, getQRCode, getStatus, getConnectionState, getLastError, initializeClient, logoutClient, resetClientSession } = require('./whatsapp');
+const { sendTaskReminders, getStatus, getConnectionState, getLastError, getBotUsername, initializeBot, stopCommandPolling } = require('./telegram');
 const { parseAndUpsertCSV } = require('./csvParser');
-const { startScheduler } = require('./scheduler');
 const db = require('./db');
+const { signToken } = require('./auth');
+const { requireAuth } = require('./middleware/auth');
 
 db.prepare("UPDATE send_jobs SET status = 'failed', error = 'Interrupted by backend restart', finished_at = ? WHERE status IN ('queued', 'running')").run(new Date().toISOString());
 
-console.log("Latest",Date.now());
+// console.log("Latest",Date.now());
 
-// Manually reset WhatsApp session – deletes session folder and restarts client
 const app = express();
-app.post('/api/reset-session', async (req, res) => {
-  try {
-    await resetClientSession();
-    res.json({ success: true, message: 'Session reset. Please scan QR again.' });
-  } catch (err) {
-    console.error('Reset error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-app.post('/api/logout', async (req, res) => {
-  try {
-    await logoutClient();
-    res.json({ success: true, message: 'Logged out successfully. Scan the new QR code.' });
-  } catch (err) {
-    console.error('Logout error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
 // const allowedOrigins = [
 //   'http://localhost:5173',
 //   'http://127.0.0.1:5173'
@@ -44,6 +26,23 @@ app.use(cors({
   origin: '*'
 }));
 app.use(express.json());
+
+app.post('/api/login', (req, res) => {
+  const { email, password, chat_id: chatId } = req.body || {};
+  const admin = db.prepare('SELECT * FROM admins WHERE email = ? AND password = ?').get(String(email || '').trim(), String(password || ''));
+  if (!admin) return res.status(401).json({ error: 'Invalid email or password.' });
+
+  if (String(chatId || '').trim()) {
+    db.prepare('UPDATE admins SET chat_id = ?, updated_at = ? WHERE id = ?')
+      .run(String(chatId).trim(), new Date().toISOString(), admin.id);
+    admin.chat_id = String(chatId).trim();
+  }
+  const token = signToken({ sub: admin.id, email: admin.email });
+  res.json({ token, admin: { email: admin.email, chat_id: admin.chat_id || null } });
+});
+
+// Every API endpoint below this line requires a valid administrator session.
+app.use('/api', requireAuth);
 
 const upload = multer({
   dest: path.join(__dirname, '../data/tmp/'),
@@ -56,14 +55,7 @@ const upload = multer({
   },
 });
 
-// const { connectMongo } = require('./whatsapp');
-try {
-  initializeClient().catch((err) => console.error('WhatsApp client initialization failed:', err.message));
-  console.log("Whatsapp connected ");
-  
-} catch (err) {
-  console.error('WhatsApp client initialization failed:', err.message);
-}
+initializeBot();
 // startScheduler();
 
 // Ensure data directories exist
@@ -89,36 +81,37 @@ async function initializeDataFromCsv() {
 // initializeDataFromCsv();
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, connected: getStatus(), state: getConnectionState() });
+  res.json({ ok: true, connected: getStatus(), state: getConnectionState(), botUsername: getBotUsername(), error: getLastError() });
 });
 
-// QR Code endpoint
-app.get('/api/qr', (req, res) => {
-  const ready = getStatus();
-  const state = getConnectionState();
-  res.json({
-    qr: getQRCode(),
-    connected:ready ||  state ==="ready" || state === 'authenticated',  // fallback
-    state: state,
-    error: getLastError(),
-  });
+app.get('/api/admin/me', (req, res) => {
+  const admin = db.prepare('SELECT email, chat_id FROM admins WHERE id = ?').get(req.admin.sub);
+  if (!admin) return res.status(404).json({ error: 'Admin not found.' });
+  res.json(admin);
 });
 
+app.post('/api/logout', (req, res) => res.json({ success: true }));
 
+app.get('/api/item-requests', (req, res) => {
+  const status = String(req.query.status || '').trim();
+  const rows = status
+    ? db.prepare('SELECT * FROM item_requests WHERE status = ? ORDER BY requested_at DESC, id DESC').all(status)
+    : db.prepare('SELECT * FROM item_requests ORDER BY requested_at DESC, id DESC').all();
+  res.json(rows);
+});
 
+app.put('/api/item-requests/:id', (req, res) => {
+  const status = String(req.body?.status || '').toLowerCase();
+  if (!['pending', 'approved', 'rejected', 'delivered'].includes(status)) {
+    return res.status(400).json({ error: 'Status must be pending, approved, rejected, or delivered.' });
+  }
+  const resolvedAt = ['approved', 'rejected', 'delivered'].includes(status) ? new Date().toISOString() : null;
+  const result = db.prepare('UPDATE item_requests SET status = ?, resolved_at = ? WHERE id = ?').run(status, resolvedAt, req.params.id);
+  if (!result.changes) return res.status(404).json({ error: 'Item request not found.' });
+  res.json({ success: true, status });
+});
 // these are the command given by the os to te nodejs backend like sigterm si signalterminate , si is signal interuppt ex: when you press ctrl+c
 
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, cleaning up...');
-  await client.destroy().catch(() => {});
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT, cleaning up...');
-  await client.destroy().catch(() => {});
-  process.exit(0);
-});
 
 // Upload task CSV – clear existing tasks first
 app.post('/api/upload', upload.single('csv'), async (req, res) => {
@@ -303,18 +296,18 @@ app.get('/api/export-tasks', async (req, res) => {
     res.status(500).json({ error: 'Failed to generate export' });
   }
 });
-// Upload phones CSV (bulk technician import)
-app.post('/api/upload-phones', upload.single('csv'), (req, res) => {
+// Upload Telegram chat IDs CSV (Name, Chat ID)
+app.post('/api/upload-chat-ids', upload.single('csv'), (req, res) => {
   const lines = fs.readFileSync(req.file.path, 'utf8').split('\n');
   let count = 0;
   lines.forEach((line, i) => {
     if (i === 0) return;
-    const [name, phone] = line.split(',').map(s => s?.trim());
-    if (name && phone) {
+    const [name, chatId] = line.split(',').map(s => s?.trim());
+    if (name && chatId) {
       db.prepare(`
-        INSERT INTO technicians (name, phone) VALUES (?, ?)
-        ON CONFLICT(name) DO UPDATE SET phone=excluded.phone
-        `).run(name, phone);
+        INSERT INTO technicians (name, chat_id) VALUES (?, ?)
+        ON CONFLICT(name) DO UPDATE SET chat_id=excluded.chat_id
+        `).run(name, chatId);
       count++;
     }
   });
@@ -350,11 +343,12 @@ app.get('/api/debug/statuses', (req, res) => {
 
 // ----- Technician CRUD with Edit & Delete -----
 app.post('/api/technicians', (req, res) => {
-  const { name, phone } = req.body;
+  const { name, chat_id: chatId } = req.body;
+  if (!name || !String(chatId || '').trim()) return res.status(400).json({ error: 'Name and Telegram chat ID are required.' });
   db.prepare(`
-    INSERT INTO technicians (name, phone) VALUES (?, ?)
-    ON CONFLICT(name) DO UPDATE SET phone=excluded.phone
-  `).run(name, phone);
+    INSERT INTO technicians (name, chat_id) VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET chat_id=excluded.chat_id
+  `).run(name, String(chatId).trim());
   res.json({ success: true });
 });
 
@@ -363,9 +357,9 @@ app.get('/api/technicians', (req, res) => {
 });
 
 app.put('/api/technicians/:id', (req, res) => {
-  const { name, phone } = req.body;
+  const { name, chat_id: chatId } = req.body;
   const { id } = req.params;
-  db.prepare(`UPDATE technicians SET name = ?, phone = ? WHERE id = ?`).run(name, phone, id);
+  db.prepare(`UPDATE technicians SET name = ?, chat_id = ? WHERE id = ?`).run(name, String(chatId || '').trim(), id);
   res.json({ success: true });
 });
 
@@ -375,88 +369,8 @@ app.delete('/api/technicians/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// Bulk send – group tasks by technician, send one image per technician
-// app.post('/api/send', async (req, res) => {
-//   const pendingTasks = db.prepare(`
-//     SELECT * FROM tasks 
-//     WHERE resolved_at IS NULL AND line_item_status = 'New'
-//   `).all();
-//   const technicians = db.prepare('SELECT * FROM technicians').all();
-//   // We'll build groups and also capture unmatched/skipped reasons for admin
-//   const groups = new Map();
-//   const skipped = [];
-
-//   for (const task of pendingTasks) {
-//     const techName = task.technician_name || '';
-//     const match = findBestMatchDetailed(techName, technicians);
-//     if (!match || !match.technician) {
-//       skipped.push({
-//         technicianName: techName,
-//         reason: match?.reason || 'name not found',
-//         suggestion: match?.suggestion || null,
-//         case_number: task.case_number
-//       });
-//       continue;
-//     }
-
-//     const tech = match.technician;
-//     // validate phone: simple numeric length check (10 digits expected)
-//     const phoneDigits = (tech.phone || '').replace(/\D/g, '');
-//     if (phoneDigits.length < 10) {
-//       skipped.push({
-//         technicianName: techName,
-//         matchedTo: tech.name,
-//         reason: 'invalid phone make sure it  is 10 digits',
-//         phone: tech.phone,
-//         case_number: task.case_number
-//       });
-//       continue;
-//     }
-//     if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, tasks: [] });
-//     groups.get(tech.id).tasks.push(task);
-//   }
-
-//   let sent = 0;
-//   const sendErrors = [];
-
-//   for (const [techId, techData] of groups) {
-//     try {
-//       await sendTaskReminders(techData.tasks, techData.phone);
-//       sent++;
-//     } catch (err) {
-//       sendErrors.push({ technician: techData.name, reason: `Send failed: ${err.message}` });
-//     }
-//   }
-  
-//   // Persist skipped and sendErrors into send_reports for frontend visibility
-//   const insertReport = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-//   const now = new Date().toISOString();
-//   for (const s of skipped) {
-//     insertReport.run(now, s.technicianName || null, s.matchedTo || s.matched_name || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
-//   }
-//   for (const e of sendErrors) {
-//     insertReport.run(now, null, e.technician || null, null, null, e.reason || null, null, 'error');
-//   }
-  
-//   res.json({
-//     success: true,
-//     sent,
-//     skipped: skipped.length + sendErrors.length,
-//     details: { skipped: skipped.slice(0, 50), sendErrors: sendErrors.slice(0, 50) }
-//   });
-// });
-
 async function processBulkSend(jobId) {
   try {
-    // const state = getConnectionState();
-    // const connected = getStatus() || state === 'authenticated';
-    // if (!connected) {
-    //   return res.status(503).json({ 
-    //     success: false, 
-    //     error: 'WhatsApp client is not ready. Please ensure QR is scanned and connection is established.' 
-    //   });
-    // }
-
     const pendingTasks = db.prepare(`
       SELECT * FROM tasks 
       WHERE line_item_status = 'New'
@@ -481,18 +395,18 @@ async function processBulkSend(jobId) {
       }
 
       const tech = match.technician;
-      const phoneDigits = normalizePhone(tech.phone);
-      if (!phoneDigits) {
+      const chatId = normalizeChatId(tech.chat_id);
+      if (!chatId) {
         skipped.push({
           technicianName: techName,
           matchedTo: tech.name,
-          phone: tech.phone,
-          reason: 'invalid phone (must be 10 digits)',
+          chat_id: tech.chat_id,
+          reason: 'missing or invalid Telegram chat ID',
           case_number: task.case_number
         });
         continue;
       }
-      if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, phone: phoneDigits, tasks: [] });
+      if (!groups.has(tech.id)) groups.set(tech.id, { ...tech, chat_id: chatId, tasks: [] });
       groups.get(tech.id).tasks.push(task);
     }
 
@@ -503,37 +417,37 @@ async function processBulkSend(jobId) {
     for (const [techId, techData] of groups) {
       try {
         const sentTaskCount = await Promise.race([
-          sendTaskReminders(techData.tasks, techData.phone),
+          sendTaskReminders(techData.tasks, techData.chat_id),
           new Promise((_, reject) => setTimeout(() => reject(new Error('Send timeout')), techTimeout))
         ]);
         sent += sentTaskCount;
-        console.log(`[BULK_SEND_SUCCESS] technician="${techData.name}" phone="${techData.phone}" cases=${techData.tasks.map((task) => task.case_number).join(',')}`);
+        console.log(`[BULK_SEND_SUCCESS] technician="${techData.name}" chat_id="${techData.chat_id}" cases=${techData.tasks.map((task) => task.case_number).join(',')}`);
         const insertSuccessReport = db.prepare(`
-          INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type)
+          INSERT INTO send_reports (created_at, technician_name, matched_name, chat_id, case_number, reason, suggestion, type)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         for (const task of techData.tasks) {
-          insertSuccessReport.run(new Date().toISOString(), task.technician_name || null, techData.name, techData.phone, task.case_number || null, 'message sent', null, 'success');
+          insertSuccessReport.run(new Date().toISOString(), task.technician_name || null, techData.name, techData.chat_id, task.case_number || null, 'message sent', null, 'success');
         }
         db.prepare('UPDATE send_jobs SET sent = ? WHERE id = ?').run(sent, jobId);
       } catch (err) {
-        sendErrors.push({ technician: techData.name, phone: techData.phone, cases: techData.tasks.map((task) => task.case_number), reason: err.message });
-        console.error(`[BULK_SEND_FAILURE] technician="${techData.name}" phone="${techData.phone}" cases=${techData.tasks.map((task) => task.case_number).join(',')} reason="${err.message}"`);
+        sendErrors.push({ technician: techData.name, chat_id: techData.chat_id, cases: techData.tasks.map((task) => task.case_number), reason: err.message });
+        console.error(`[BULK_SEND_FAILURE] technician="${techData.name}" chat_id="${techData.chat_id}" cases=${techData.tasks.map((task) => task.case_number).join(',')} reason="${err.message}"`);
       }
     }
 
     const insertReport = db.prepare(`
-      INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type)
+      INSERT INTO send_reports (created_at, technician_name, matched_name, chat_id, case_number, reason, suggestion, type)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const now = new Date().toISOString();
     for (const s of skipped) {
-      console.error(`[BULK_SEND_SKIPPED] technician="${s.technicianName}" phone="${s.phone || ''}" case="${s.case_number || ''}" reason="${s.reason}"`);
-      insertReport.run(now, s.technicianName || null, s.matchedTo || null, s.phone || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
+      console.error(`[BULK_SEND_SKIPPED] technician="${s.technicianName}" chat_id="${s.chat_id || ''}" case="${s.case_number || ''}" reason="${s.reason}"`);
+      insertReport.run(now, s.technicianName || null, s.matchedTo || null, s.chat_id || null, s.case_number || null, s.reason || null, s.suggestion || null, 'skipped');
     }
     for (const e of sendErrors) {
       for (const caseNumber of e.cases || [null]) {
-        insertReport.run(now, e.technician || null, e.technician || null, e.phone || null, caseNumber, e.reason || null, null, 'error');
+        insertReport.run(now, e.technician || null, e.technician || null, e.chat_id || null, caseNumber, e.reason || null, null, 'error');
       }
     }
 
@@ -601,7 +515,7 @@ app.post('/api/recover-send-reports', (req, res) => {
         )
     `).all();
 
-    const insert = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, phone, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insert = db.prepare(`INSERT INTO send_reports (created_at, technician_name, matched_name, chat_id, case_number, reason, suggestion, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     const now = new Date().toISOString();
     let inserted = 0;
     for (const r of rows) {
@@ -674,12 +588,9 @@ function findBestMatchDetailed(name, technicians) {
   return { technician: null, reason: 'no good match', suggestion: best?.name || null };
 }
 
-function normalizePhone(phone) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  if (digits.length === 10) return digits;
-  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1);
-  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
-  return null;
+function normalizeChatId(chatId) {
+  const value = String(chatId || '').trim();
+  return /^-?\d+$/.test(value) ? value : null;
 }
 
 // Dashboard stats (unchanged, but now pending only from current data)
@@ -730,6 +641,26 @@ app.get("/", (req, res) => {
   });
 });
 
-app.listen(5000, () => {
-  console.log('Backend running on port 5000');
+const port = Number(process.env.PORT) || 5000;
+const server = app.listen(port, () => {
+  console.log(`Backend running on port ${port}`);
 });
+
+let shutdownPromise;
+
+async function shutdown(signal) {
+  if (shutdownPromise) return shutdownPromise;
+
+  shutdownPromise = (async () => {
+    console.log(`Received ${signal}, cleaning up...`);
+    await stopCommandPolling();
+    await new Promise((resolve) => server.close(resolve));
+    db.close();
+    process.exit(0);
+  })();
+
+  return shutdownPromise;
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -3,7 +3,7 @@ node_modules/
 .env
 *.log
 
-# === WhatsApp Session ===
+# === Legacy local session data ===
 session/
 .wwebjs_cache/
 data/session/
