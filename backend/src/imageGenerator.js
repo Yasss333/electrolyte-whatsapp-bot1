@@ -7,6 +7,7 @@ const MAX_TASKS_PER_CARD = Number.isFinite(configuredTasksPerCard) && configured
   ? configuredTasksPerCard
   : 25;
 const IMAGE_RETENTION_DAYS = 7;
+const FONT_FAMILY = 'Noto Sans';
 
 function wrapText(ctx, value, maxWidth) {
   const words = String(value || '-').split(/\s+/);
@@ -68,17 +69,17 @@ function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1, tota
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 24px sans-serif';
+  ctx.font = `bold 24px "${FONT_FAMILY}"`;
   ctx.fillText(`Pending Tasks for ${safeName}`, margin + 4, 42);
   ctx.fillStyle = '#475569';
-  ctx.font = '14px sans-serif';
+  ctx.font = `14px "${FONT_FAMILY}"`;
   ctx.fillText(`Total: ${totalTasks} task(s) | Part ${part} of ${totalParts}`, margin + 6, 68);
 
   let y = titleHeight;
   ctx.fillStyle = '#1e293b';
   ctx.fillRect(margin, y, tableWidth, headerHeight);
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 14px sans-serif';
+  ctx.font = `bold 14px "${FONT_FAMILY}"`;
   let x = margin + padding;
   for (const col of cols) {
     ctx.fillText(col.label, x, y + 25);
@@ -92,7 +93,7 @@ function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1, tota
     ctx.strokeStyle = '#e2e8f0';
     ctx.strokeRect(margin, y, tableWidth, height);
     ctx.fillStyle = '#0f172a';
-    ctx.font = '13px sans-serif';
+    ctx.font = `13px "${FONT_FAMILY}"`;
     let xPos = margin + padding;
     const values = [
       [task.case_number || '-'],
@@ -110,7 +111,7 @@ function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1, tota
     y += height;
   });
   ctx.fillStyle = '#94a3b8';
-  ctx.font = '12px sans-serif';
+  ctx.font = `12px "${FONT_FAMILY}"`;
   ctx.fillText('Electrolyte Solutions - Automated Reminder', margin + 4, canvasHeight - 10);
 
   const dir = path.join(__dirname, '../generated-images');

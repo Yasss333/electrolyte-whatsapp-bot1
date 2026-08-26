@@ -16,5 +16,8 @@ aptPkgs = [
   "libpangocairo-1.0-0",
   "libpango-1.0-0",
   "libcairo2",
-  "fonts-liberation"
+  "fontconfig",
+  "fonts-liberation",
+  "fonts-dejavu",
+  "fonts-noto-core"
 ]
