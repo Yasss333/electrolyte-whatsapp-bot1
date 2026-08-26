@@ -34,7 +34,7 @@ function cleanupGeneratedImages(dir) {
   }
 }
 
-function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1) {
+function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1, totalTasks = tasks.length) {
   const safeName = technicianName || 'Technician';
   const cols = [
     { key: 'case_number', label: 'Case #', width: 90 },
@@ -60,8 +60,10 @@ function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1) {
   const canvasWidth = tableWidth + margin * 2;
   const tableHeight = headerHeight + rowData.reduce((sum, row) => sum + row.height, 0) + 5;
   const canvasHeight = titleHeight + tableHeight + footerHeight + 20;
-  const canvas = createCanvas(canvasWidth, canvasHeight);
+  const imageScale = 1.5;
+  const canvas = createCanvas(Math.ceil(canvasWidth * imageScale), Math.ceil(canvasHeight * imageScale));
   const ctx = canvas.getContext('2d');
+  ctx.scale(imageScale, imageScale);
 
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
@@ -70,7 +72,7 @@ function generateTasksCard(tasks, technicianName, part = 1, totalParts = 1) {
   ctx.fillText(`Pending Tasks for ${safeName}`, margin + 4, 42);
   ctx.fillStyle = '#475569';
   ctx.font = '14px sans-serif';
-  ctx.fillText(`Total: ${tasks.length} task(s) | Part ${part} of ${totalParts}`, margin + 6, 68);
+  ctx.fillText(`Total: ${totalTasks} task(s) | Part ${part} of ${totalParts}`, margin + 6, 68);
 
   let y = titleHeight;
   ctx.fillStyle = '#1e293b';
@@ -126,7 +128,8 @@ function generateTasksCards(tasks, technicianName) {
     tasks.slice(index * MAX_TASKS_PER_CARD, (index + 1) * MAX_TASKS_PER_CARD),
     technicianName,
     index + 1,
-    totalParts
+    totalParts,
+    tasks.length
   ));
 }
 

@@ -4,12 +4,20 @@ Electrolyte Bot imports task CSV files, groups pending tasks by technician, crea
 
 ## Setup
 
-1. Create a bot with Telegram's `@BotFather` and copy its API token.
-2. Set `TELEGRAM_BOT_TOKEN` in `backend/.env` (or your cloud host's environment settings).
-3. Start the backend and open the Setup tab to verify that the bot is connected.
-4. Each technician must open the bot and press **Start** before it can send them a message.
-5. In **Technicians**, save each technician's numeric Telegram chat ID. Bulk CSV format is `Name, Chat ID`.
-6. Upload the task CSV and choose **Bulk Send**.
+### Create the bot with BotFather
+
+1. Open Telegram and search for `@BotFather`.
+2. Send `/newbot`, then enter a display name and a unique username ending in `bot`.
+3. Copy the HTTP API token BotFather returns.
+4. Set `TELEGRAM_BOT_TOKEN` in `backend/.env` (or your cloud host's environment settings).
+5. Start the backend and open the Setup tab to verify that the bot is connected.
+
+### Add technician chat IDs
+
+1. Send the bot username to each technician and have each technician open it and press **Start**. A bot cannot start a direct conversation itself.
+2. Ask the technician to send any message containing the word `task` or `tasks` (or `/start`). The backend prints their numeric chat ID as `[TELEGRAM_CHAT_ID] ...` in its console.
+3. In **Technicians**, save the technician's name and that numeric Telegram chat ID. Bulk CSV format is `Name, Chat ID`.
+4. Upload the task CSV and choose **Bulk Send**.
 
 ## Environment variables
 
